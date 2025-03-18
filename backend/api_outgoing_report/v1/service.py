@@ -2,7 +2,7 @@ from backend.api_outgoing_report.v1.exceptions import TempOutgoingReportCreateEx
 from backend.api_outgoing_report.v1.main import AppService
 from backend.api_outgoing_report.v1.schemas import OutgoingFormCreate, OutgoingFormUpdate
 from uuid import UUID
-from .crud import TempOutgoingReportCRUD
+from backend.api_outgoing_report.v1.crud import TempOutgoingReportCRUD
 
 
 
