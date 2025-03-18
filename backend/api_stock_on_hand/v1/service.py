@@ -1,12 +1,10 @@
-from pydantic_core import to_jsonable_python
-
+from sqlalchemy.exc import IntegrityError
+from backend.api_raw_materials.v1.schemas import RawMaterialCreate
+from backend.api_raw_materials.v1.crud import RawMaterialCRUD
 from backend.api_status.v1.models import Status
 from backend.api_raw_materials.v1.models import RawMaterial
 from backend.api_stock_on_hand.v1.exceptions import (StockOnHandCreateException,
                                                      StockOnHandNotFoundException,
-                                                     StockOnHandUpdateException,
-                                                     StockOnHandSoftDeleteException,
-                                                     StockOnHandRestoreException
                                                      )
 from backend.api_stock_on_hand.v1.main import AppService
 from backend.api_stock_on_hand.v1.schemas import StockOnHandCreate, StockOnHandUpdate
@@ -15,6 +13,7 @@ import io
 import pandas as pd
 from backend.api_warehouses.v1.models import Warehouse
 from backend.api_stock_on_hand.v1.crud import StockOnHandCRUD
+from fastapi import HTTPException
 
 
 
@@ -84,13 +83,42 @@ class StockOnHandService(AppService):
         try:
             # Convert the incoming items to SQLAlchemy model instances
 
+            # def get_rm_code_id(rm_code):
+            #     # Remove any leading or trailing whitespace from rm_code
+            #     raw_mat = rm_code.strip().upper()
+            #
+            #
+            #     rm_code_record = self.db.query(RawMaterial.id).filter(RawMaterial.rm_code == raw_mat).first()
+            #     return rm_code_record.id if rm_code_record else None
+
             def get_rm_code_id(rm_code):
-                # Remove any leading or trailing whitespace from rm_code
+                # This code removes any leading or trailing whitespace and converts to uppercase
                 raw_mat = rm_code.strip().upper()
 
-
+                # This code checks if the raw material exists
                 rm_code_record = self.db.query(RawMaterial.id).filter(RawMaterial.rm_code == raw_mat).first()
-                return rm_code_record.id if rm_code_record else None
+
+                if rm_code_record:
+                    return rm_code_record.id  # It returns the existing raw material ID
+
+                # If raw material does not exist, create it
+                new_raw_material_data = RawMaterialCreate(
+                    rm_code=raw_mat,  # Ensure rm_code is set (mandatory)
+                    rm_name=raw_mat,  # Assuming rm_name is the same as rm_code
+                    description="Auto-generated raw material",  # Provide a default description
+                    created_by_id=None,  # Replace with actual user ID if needed
+                    updated_by_id=None
+                )
+
+                # Instantiate the RawMaterialCRUD class
+                raw_material_crud = RawMaterialCRUD(self.db)
+
+                try:
+                    new_raw_material = raw_material_crud.create_raw_material(new_raw_material_data)
+                    return new_raw_material.id
+                except IntegrityError:
+                    self.db.rollback()
+                    raise HTTPException(status_code=500, detail="Error while creating raw material.")
 
             def get_status_id(status_name):
                 status_record = self.db.query(Status.id).filter(Status.name == status_name).first()
