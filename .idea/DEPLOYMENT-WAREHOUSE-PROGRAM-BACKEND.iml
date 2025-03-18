@@ -2,7 +2,7 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$" />
-    <orderEntry type="jdk" jdkName="warehouse_program_api_env" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.10 virtualenv at C:\Users\Administrator\Desktop\MBPI-Projects\DEPLOYMENT-WAREHOUSE-PROGRAM-BACKEND\venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">
