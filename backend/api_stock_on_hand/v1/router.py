@@ -65,11 +65,14 @@ async def delete_rm_soh(rm_soh_id: UUID, db: get_db = Depends()):
 
 
 @router.post("/import_stock_data/", response_model=HistoricalStockOnHandResponse)
-async def import_stock_data(file: UploadFile = File(...), db: get_db = Depends()):
+async def import_stock_data(
+        file: UploadFile = File(...),
+        password: str = None,
+        db: get_db = Depends()):
     try:
         # Process the Excel file and insert data
         content = await file.read()
-        StockOnHandService(db).import_rm_soh(content)
+        StockOnHandService(db).import_rm_soh(content, password)
         return JSONResponse(content={"message": "Data imported successfully!"}, status_code=200)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
