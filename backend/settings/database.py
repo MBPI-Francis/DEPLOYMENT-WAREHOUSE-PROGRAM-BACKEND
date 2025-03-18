@@ -43,11 +43,4 @@ def get_db():
         db.close()
 
 
-# Uncomment this if you are running the API locally (your own computer)
-server_ip = "http://127.0.0.1:8000"
-
-
-# Uncomment this if you are deploying the API using company's Server
-# server_ip = "http://192.168.1.13:8000"
-
 
