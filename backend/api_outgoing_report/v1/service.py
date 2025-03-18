@@ -1,6 +1,6 @@
 from backend.api_outgoing_report.v1.exceptions import TempOutgoingReportCreateException, TempOutgoingReportNotFoundException
 from backend.api_outgoing_report.v1.main import AppService
-from backend.api_outgoing_report.v1.schemas import TempOutgoingReportCreate, TempOutgoingReportUpdate
+from backend.api_outgoing_report.v1.schemas import OutgoingFormCreate, OutgoingFormUpdate
 from uuid import UUID
 from .crud import TempOutgoingReportCRUD
 
@@ -8,7 +8,7 @@ from .crud import TempOutgoingReportCRUD
 
 # These are the code for the business logic like calculation etc.
 class TempOutgoingReportService(AppService):
-    def create_outgoing_report(self, item: TempOutgoingReportCreate):
+    def create_outgoing_report(self, item: OutgoingFormCreate):
         try:
             outgoing_report_item = TempOutgoingReportCRUD(self.db).create_outgoing_report(item)
 
@@ -43,7 +43,7 @@ class TempOutgoingReportService(AppService):
         return outgoing_report_item
 
     # This is the service/business logic in updating the outgoing_report.
-    def update_outgoing_report(self, outgoing_report_id: UUID, outgoing_report_update: TempOutgoingReportUpdate):
+    def update_outgoing_report(self, outgoing_report_id: UUID, outgoing_report_update: OutgoingFormUpdate):
         outgoing_report = TempOutgoingReportCRUD(self.db).update_outgoing_report(outgoing_report_id, outgoing_report_update)
         return outgoing_report
 
