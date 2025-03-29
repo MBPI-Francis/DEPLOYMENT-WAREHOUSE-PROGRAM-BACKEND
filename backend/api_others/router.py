@@ -334,18 +334,13 @@ async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, statu
 async def check_stock_for_update(rm_id: UUID, warehouse_id: UUID, entered_qty: float, status_id: Optional[UUID]=None, db: get_db = Depends()):
     try:
         # Check if the status id is null
-        if status_id:
-            query = text(f"""SELECT beginningbalance FROM public.view_beginning_soh
-                                       WHERE warehouseid = '{warehouse_id}'
-                                               AND statusid = '{status_id}'
-                                               AND rawmaterialid = '{rm_id}'
-                                                """)
 
-        else:
-            query = text(f"""SELECT beginningbalance FROM public.view_beginning_soh
-                            WHERE warehouseid = '{warehouse_id}'
-                                    AND rawmaterialid = '{rm_id}'
-                                    AND statusid IS NULL""")
+        query = text(f"""SELECT beginningbalance FROM public.view_beginning_soh
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'
+                                            """)
+
         result = db.execute(query)
         beginning_balance = result.fetchone()
         # Check if there is a record after executing the query

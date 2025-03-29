@@ -79,17 +79,16 @@ class StockOnHandCRUD(AppCRUD):
         else:
             return []
 
-    def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id):
+    def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id, date_computed):
         # Insert data into the StockOnHand table
 
-        current_date = date.today()  # Get current date and time
-
+        print("This is ", date_computed)
         new_stock_on_hand = StockOnHand(
             rm_code_id=rm_code_id,
             rm_soh=total,
             status_id=status_id,
             warehouse_id=warehouse_id,
-            date_computed=current_date,
+            date_computed=date_computed,
             is_imported = True
         )
         self.db.add(new_stock_on_hand)

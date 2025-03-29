@@ -156,6 +156,26 @@ class StockOnHandService(AppService):
                 for sheet_name, data in df.items():
                     if sheet_name in ['WHSE1', 'WHSE2', 'WHSE4']:
 
+                        # Extract the date from the column header (first column name)
+                        snapshot_date = None
+                        try:
+                            raw_value = str(data.columns[0]).strip()  # Get the first column header as a string
+                            snapshot_date = pd.to_datetime(raw_value, errors='coerce').date()  # Convert to date
+
+                            if pd.isna(snapshot_date):
+                                raise ValueError(
+                                    f"Invalid date format in column header: {raw_value}")  # Raise error for debugging
+
+                        except Exception as e:
+                            raise HTTPException(status_code=400,
+                                                detail=f"Invalid date format in column header of {sheet_name}: {str(e)}")
+
+                        # Rename columns manually (shift column names down since the first row is actual data)
+                        data.columns = data.iloc[0]  # Set first row as column headers
+                        data = data[1:].reset_index(drop=True)  # Drop first row and reset index
+
+
+
                         # Rename columns manually based on observed structure
                         data.columns = ["A", "B", "C", "D", "E", "F", "G"]  # Adjust as needed
 
@@ -178,7 +198,7 @@ class StockOnHandService(AppService):
                             warehouse_id = get_warehouse_id(sheet_name.lower())
 
                             # Insert the data into the StockOnHand table
-                            StockOnHandCRUD(self.db).import_rm_soh(rm_code_id, total, status_id, warehouse_id)
+                            StockOnHandCRUD(self.db).import_rm_soh(rm_code_id, total, status_id, warehouse_id, snapshot_date)
 
             except HTTPException as e:
                 raise e  # Pass FastAPI errors directly

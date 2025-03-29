@@ -13,6 +13,7 @@ CREATE_BEGGINING_VIEW_QUERY = """
                 rm.rm_code AS rmcode,
                 soh.rm_soh AS beginningbalance,
                 soh.stock_change_date AS stockchangedate,
+                soh.date_computed,
                 COALESCE(status.name, ''::character varying) AS statusname,
                 soh.status_id AS statusid,
                 row_number() OVER (PARTITION BY soh.warehouse_id, soh.rm_code_id, soh.status_id ORDER BY soh.stock_change_date DESC) AS row_num
@@ -29,7 +30,8 @@ CREATE_BEGGINING_VIEW_QUERY = """
         rankedrecords.beginningbalance,
         rankedrecords.statusname,
         rankedrecords.statusid,
-        rankedrecords.stockchangedate
+        rankedrecords.stockchangedate,
+        rankedrecords.date_computed
        FROM rankedrecords
       WHERE rankedrecords.row_num = 1
       ORDER BY rankedrecords.rmcode, rankedrecords.stockchangedate DESC;
