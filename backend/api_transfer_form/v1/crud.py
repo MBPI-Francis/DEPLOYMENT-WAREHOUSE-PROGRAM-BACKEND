@@ -51,9 +51,6 @@ class TempTransferFormCRUD(AppCRUD):
             # Extract date_computed if record exists, else use None
             date_computed = existing_record[9] if existing_record else None
 
-            print(existing_record)  # This prints the entire tuple (date_computed,)
-            print("Date Computed: ", date_computed)
-
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=transfer_form.rm_code_id,
