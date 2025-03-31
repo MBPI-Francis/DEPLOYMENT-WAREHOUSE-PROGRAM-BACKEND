@@ -45,12 +45,29 @@ class TempReceivingReportCRUD(AppCRUD):
 
         # This feature is required for the calculation
         if not result:
+
+            # Get the date computed date from other existing records
+            existing_query = text("""SELECT * FROM view_beginning_soh
+                                    WHERE rawmaterialid = :rm_code_id
+                                            AND statusid = :status_id""")
+
+            existing_record = self.db.execute(existing_query, {
+                "rm_code_id": receiving_report.rm_code_id,
+                "status_id": status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+
+            # Extract date_computed if record exists, else use None
+            date_computed = existing_record[9] if existing_record else None
+
+
+
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=receiving_report.rm_code_id,
                 warehouse_id=receiving_report.warehouse_id,
                 rm_soh=0.00,
-                status_id=status_id
+                status_id=status_id,
+                date_computed=date_computed
             )
             self.db.add(new_stock)
             self.db.commit()
@@ -100,6 +117,8 @@ class TempReceivingReportCRUD(AppCRUD):
                     TempReceivingReport.is_deleted == False  # False check for is_deleted
                 )
             )
+
+            .order_by(desc(TempReceivingReport.created_at))  # Order from newest to oldest
         )
 
         # Return All the result

@@ -11,7 +11,7 @@ from backend.api_raw_materials.v1.models import RawMaterial
 from backend.api_warehouses.v1.models import Warehouse
 from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_status.v1.models import Status
-from sqlalchemy import or_
+from sqlalchemy import or_, desc
 from sqlalchemy.orm import aliased
 from sqlalchemy import text
 
@@ -39,12 +39,29 @@ class TempHeldFormCRUD(AppCRUD):
 
         # This feature is required for the calculation
         if not result:
+
+
+            # Get the date computed date from other existing records
+            existing_query = text("""SELECT * FROM view_beginning_soh
+                                    WHERE rawmaterialid = :rm_code_id
+                                            AND statusid = :status_id""")
+
+            existing_record = self.db.execute(existing_query, {
+                "rm_code_id": held_form.rm_code_id,
+                "status_id": held_form.current_status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+
+            # Extract date_computed if record exists, else use None
+            date_computed = existing_record[9] if existing_record else None
+
+
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=held_form.rm_code_id,
                 warehouse_id=held_form.warehouse_id,
                 rm_soh=0.00,
-                status_id=held_form.new_status_id
+                status_id=held_form.new_status_id,
+                date_computed=date_computed
             )
             self.db.add(new_stock)
             self.db.commit()
@@ -107,6 +124,8 @@ class TempHeldFormCRUD(AppCRUD):
                     TempHeldForm.is_deleted == False  # False check for is_deleted
                 )
             )
+
+            .order_by(desc(TempHeldForm.created_at))  # Order from newest to oldest
 
         )
 

@@ -11,7 +11,7 @@ from backend.api_warehouses.v1.models import Warehouse
 from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_status.v1.models import Status
 from uuid import UUID
-from sqlalchemy import text
+from sqlalchemy import text, desc
 from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 
@@ -121,6 +121,8 @@ class TempTransferFormCRUD(AppCRUD):
                     TempTransferForm.is_deleted == False  # False check for is_deleted
                 )
             )
+
+            .order_by(desc(TempTransferForm.created_at))  # Order from newest to oldest
         )
 
         # Return filtered results

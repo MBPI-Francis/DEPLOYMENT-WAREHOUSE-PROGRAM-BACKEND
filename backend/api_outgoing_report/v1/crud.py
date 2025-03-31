@@ -10,7 +10,7 @@ from backend.api_outgoing_report.v1.schemas import OutgoingFormCreate, OutgoingF
 from uuid import UUID
 from backend.api_raw_materials.v1.models import RawMaterial
 from backend.api_warehouses.v1.models import Warehouse
-from sqlalchemy import or_
+from sqlalchemy import or_, desc
 
 
 # These are the code for the app to communicate to the database
@@ -67,6 +67,8 @@ class TempOutgoingReportCRUD(AppCRUD):
                     TempOutgoingReport.is_deleted == False  # False check for is_deleted
                 )
             )
+
+            .order_by(desc(TempOutgoingReport.created_at))  # Order from newest to oldest
         )
 
         # Return All the result
