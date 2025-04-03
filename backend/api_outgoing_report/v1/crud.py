@@ -49,7 +49,8 @@ class TempOutgoingReportCRUD(AppCRUD):
                 Status.name.label("status"),
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
-                TempOutgoingReport.updated_at
+                TempOutgoingReport.updated_at,
+                TempOutgoingReport.date_computed
 
             )
 
@@ -89,7 +90,8 @@ class TempOutgoingReportCRUD(AppCRUD):
                 Status.name.label("status"),
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
-                TempOutgoingReport.updated_at
+                TempOutgoingReport.updated_at,
+                TempOutgoingReport.date_computed
 
             )
 
@@ -120,7 +122,8 @@ class TempOutgoingReportCRUD(AppCRUD):
                 Status.name.label("status"),
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
-                TempOutgoingReport.updated_at
+                TempOutgoingReport.updated_at,
+                TempOutgoingReport.date_computed
 
             )
 
