@@ -82,7 +82,6 @@ class StockOnHandCRUD(AppCRUD):
     def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id, date_computed):
         # Insert data into the StockOnHand table
 
-        print("This is ", date_computed)
         new_stock_on_hand = StockOnHand(
             rm_code_id=rm_code_id,
             rm_soh=total,
