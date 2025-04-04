@@ -13,6 +13,7 @@ from uuid import UUID
 from backend.api_warehouses.v1.models import Warehouse
 from sqlalchemy import or_
 from datetime import date
+from sqlalchemy import text
 
 # These are the code for the app to communicate to the database
 class StockOnHandCRUD(AppCRUD):
@@ -82,13 +83,26 @@ class StockOnHandCRUD(AppCRUD):
     def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id, date_computed):
         # Insert data into the StockOnHand table
 
+        # Get the largest stock recalculation count
+        existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
+                                FROM tbl_stock_on_hand;
+                                """)
+
+        largest_count = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+        if largest_count[0]:
+            new_stock_recalculation_count = largest_count[0] + 1
+        else:
+            new_stock_recalculation_count = 1
+
+
         new_stock_on_hand = StockOnHand(
             rm_code_id=rm_code_id,
             rm_soh=total,
             status_id=status_id,
             warehouse_id=warehouse_id,
             date_computed=date_computed,
-            is_imported = True
+            is_imported=True,
+            stock_recalculation_count=new_stock_recalculation_count
         )
         self.db.add(new_stock_on_hand)
         self.db.commit()

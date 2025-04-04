@@ -11,6 +11,7 @@ class StockOnHandBase(BaseModel):
     warehouse_id: UUID
     status_id: Optional[UUID] = None
     rm_soh: float
+    stock_recalculation_count: int
 
 
 class StockOnHandCreate(StockOnHandBase):
