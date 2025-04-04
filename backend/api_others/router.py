@@ -13,6 +13,7 @@ from backend.api_receiving_report.v1.models import TempReceivingReport
 from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_change_status_form.v1.models import TempHeldForm
 from typing import Optional
+from datetime import datetime, timedelta
 
 
 
@@ -168,6 +169,8 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
     """
 
     current_date = date.today()
+    params_date = datetime.strptime(params_date, "%Y-%m-%d").strftime("%m/%d/%Y")
+
     query = text("SELECT * FROM view_ending_stocks_balance")
 
     try:
@@ -191,7 +194,7 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
                                       warehouse_id=record["warehouseid"],
                                       rm_soh=record["new_beginning_balance"],
                                       status_id= record["statusid"],
-                                      date_computed=current_date)
+                                      date_computed=params_date)
             db.add(rm_soh_item)
             db.commit()
             db.refresh(rm_soh_item)
