@@ -16,8 +16,8 @@ CREATE_BEGGINING_VIEW_QUERY = """
                 soh.date_computed,
                 COALESCE(status.name, ''::character varying) AS statusname,
                 soh.status_id AS statusid,
-                row_number() OVER (PARTITION BY soh.warehouse_id, soh.rm_code_id, soh.status_id ORDER BY soh.stock_change_date DESC) AS row_num
-               FROM tbl_stock_on_hand soh
+                soh.stock_recalculation_count AS recalculation_count
+               FROM tbl_stock_on_hand soh 
                  JOIN tbl_raw_materials rm ON soh.rm_code_id = rm.id
                  JOIN tbl_warehouses wh ON soh.warehouse_id = wh.id
                  LEFT JOIN tbl_status status ON soh.status_id = status.id
@@ -31,9 +31,12 @@ CREATE_BEGGINING_VIEW_QUERY = """
         rankedrecords.statusname,
         rankedrecords.statusid,
         rankedrecords.stockchangedate,
-        rankedrecords.date_computed
+        rankedrecords.date_computed,
+		rankedrecords.recalculation_count
        FROM rankedrecords
-      WHERE rankedrecords.row_num = 1
+      WHERE rankedrecords.recalculation_count = (	SELECT 
+													MAX(rankedrecords.recalculation_count)
+	  												FROM rankedrecords)
       ORDER BY rankedrecords.rmcode, rankedrecords.stockchangedate DESC;
     
     ALTER TABLE public.view_beginning_soh
@@ -48,35 +51,40 @@ CREATE_ENDING_VIEW_QUERY = """
     CREATE OR REPLACE VIEW public.view_ending_stocks_balance
      AS
          WITH initialbalance AS (
-             WITH rankedrecords AS (
-                     SELECT soh.warehouse_id AS warehouseid,
-                        wh.wh_name AS warehousename,
-                        wh.wh_number AS warehousenumber,
-                        soh.rm_code_id AS rawmaterialid,
-                        rm.rm_code AS rmcode,
-                        soh.rm_soh AS beginningbalance,
-                        soh.stock_change_date AS stockchangedate,
-                        status.name AS statusname,
-                        soh.status_id AS statusid,
-                        row_number() OVER (PARTITION BY soh.warehouse_id, soh.rm_code_id, soh.status_id ORDER BY soh.stock_change_date DESC) AS row_num
-                       FROM tbl_stock_on_hand soh
-                         JOIN tbl_raw_materials rm ON soh.rm_code_id = rm.id
-                         JOIN tbl_warehouses wh ON soh.warehouse_id = wh.id
-                         LEFT JOIN tbl_status status ON soh.status_id = status.id
-                    )
-             SELECT rankedrecords.warehouseid,
+            WITH rankedrecords AS (
+                SELECT soh.warehouse_id AS warehouseid,
+                    wh.wh_name AS warehousename,
+                    wh.wh_number AS warehousenumber,
+                    soh.rm_code_id AS rawmaterialid,
+                    rm.rm_code AS rmcode,
+                    soh.rm_soh AS beginningbalance,
+                    soh.stock_change_date AS stockchangedate,
+                    soh.date_computed,
+                    COALESCE(status.name, ''::character varying) AS statusname,
+                    soh.status_id AS statusid,
+                    soh.stock_recalculation_count AS recalculation_count
+                   FROM tbl_stock_on_hand soh 
+                     JOIN tbl_raw_materials rm ON soh.rm_code_id = rm.id
+                     JOIN tbl_warehouses wh ON soh.warehouse_id = wh.id
+                     LEFT JOIN tbl_status status ON soh.status_id = status.id
+                )
+            SELECT rankedrecords.warehouseid,
                 rankedrecords.warehousename,
                 rankedrecords.warehousenumber,
                 rankedrecords.rawmaterialid,
                 rankedrecords.rmcode,
                 rankedrecords.beginningbalance,
-                rankedrecords.stockchangedate,
                 rankedrecords.statusname,
-                rankedrecords.statusid
-               FROM rankedrecords
-              WHERE rankedrecords.row_num = 1
+                rankedrecords.statusid,
+                rankedrecords.stockchangedate,
+                rankedrecords.date_computed,
+                rankedrecords.recalculation_count
+            FROM rankedrecords
+            WHERE rankedrecords.recalculation_count = (	SELECT 
+                                                        MAX(rankedrecords.recalculation_count)
+                                                        FROM rankedrecords)
             ), 
-			
+            
 			ogr_adjustments AS (
              SELECT ogr.warehouse_id AS warehouseid,
                 ogr.rm_code_id AS rawmaterialid,

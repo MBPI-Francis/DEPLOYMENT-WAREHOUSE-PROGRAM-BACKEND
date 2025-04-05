@@ -80,20 +80,8 @@ class StockOnHandCRUD(AppCRUD):
         else:
             return []
 
-    def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id, date_computed):
+    def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id, date_computed, count):
         # Insert data into the StockOnHand table
-
-        # Get the largest stock recalculation count
-        existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
-                                FROM tbl_stock_on_hand;
-                                """)
-
-        largest_count = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-        if largest_count[0]:
-            new_stock_recalculation_count = largest_count[0] + 1
-        else:
-            new_stock_recalculation_count = 1
-
 
         new_stock_on_hand = StockOnHand(
             rm_code_id=rm_code_id,
@@ -102,7 +90,7 @@ class StockOnHandCRUD(AppCRUD):
             warehouse_id=warehouse_id,
             date_computed=date_computed,
             is_imported=True,
-            stock_recalculation_count=new_stock_recalculation_count
+            stock_recalculation_count=count
         )
         self.db.add(new_stock_on_hand)
         self.db.commit()

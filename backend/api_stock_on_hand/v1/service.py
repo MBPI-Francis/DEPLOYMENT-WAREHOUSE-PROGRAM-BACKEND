@@ -15,7 +15,7 @@ from backend.api_warehouses.v1.models import Warehouse
 from backend.api_stock_on_hand.v1.crud import StockOnHandCRUD
 from fastapi import HTTPException
 import msoffcrypto
-
+from sqlalchemy import text
 
 
 
@@ -129,6 +129,22 @@ class StockOnHandService(AppService):
                         self.db.rollback()
                         raise HTTPException(status_code=500, detail="Error while creating raw material.")
 
+
+                def get_latest_count():
+                    # Get the largest stock recalculation count
+                    existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
+                                            FROM tbl_stock_on_hand;
+                                            """)
+
+                    largest_count = self.db.execute(
+                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+                    if largest_count[0]:
+                        new_stock_recalculation_count = largest_count[0] + 1
+                    else:
+                        new_stock_recalculation_count = 1
+
+                    return new_stock_recalculation_count
+
                 def get_status_id(status_name):
                     status_record = self.db.query(Status.id).filter(Status.name == status_name).first()
                     return status_record.id if status_record else None
@@ -151,6 +167,9 @@ class StockOnHandService(AppService):
                             Warehouse.wh_number == warehouse_number).first()
                         return warehouse_record.id if warehouse_record else None
                     return None
+
+                # Get the latest count
+                latest_count = get_latest_count()
 
                 # Process each sheet
                 for sheet_name, data in df.items():
@@ -198,7 +217,7 @@ class StockOnHandService(AppService):
                             warehouse_id = get_warehouse_id(sheet_name.lower())
 
                             # Insert the data into the StockOnHand table
-                            StockOnHandCRUD(self.db).import_rm_soh(rm_code_id, total, status_id, warehouse_id, snapshot_date)
+                            StockOnHandCRUD(self.db).import_rm_soh(rm_code_id, total, status_id, warehouse_id, snapshot_date, latest_count)
 
             except HTTPException as e:
                 raise e  # Pass FastAPI errors directly

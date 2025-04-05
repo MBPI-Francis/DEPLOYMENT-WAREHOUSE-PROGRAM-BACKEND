@@ -168,26 +168,29 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
         A JSON response indicating the success of the operation.
     """
 
-    current_date = date.today()
     params_date = datetime.strptime(params_date, "%Y-%m-%d").strftime("%m/%d/%Y")
     query = text("SELECT * FROM view_ending_stocks_balance")
 
-    largest_count = 0
-    # Get the largest stock recalculation count
-    existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
-                            FROM tbl_stock_on_hand;
-                            """)
+    def get_latest_count():
+        # Get the largest stock recalculation count
+        existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
+                                FROM tbl_stock_on_hand;
+                                """)
+
+        largest_count = db.execute(
+            existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+        if largest_count[0]:
+            new_stock_recalculation_count = largest_count[0] + 1
+        else:
+            new_stock_recalculation_count = 1
+
+        return new_stock_recalculation_count
 
 
     try:
         # Execute the query and fetch all rows
         result = db.execute(query).fetchall()
-        largest_count = db.execute(existing_query).fetchone()
-
-        if largest_count[0]:
-            new_stock_recalculation_count = largest_count[0] + 1
-        else:
-            new_stock_recalculation_count = 1
+        latest_count = get_latest_count()
 
         # Convert the result into a list of dictionaries
         records = [
@@ -207,7 +210,7 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
                                       rm_soh=record["new_beginning_balance"],
                                       status_id= record["statusid"],
                                       date_computed=params_date,
-                                      stock_recalculation_count=new_stock_recalculation_count)
+                                      stock_recalculation_count=latest_count)
             db.add(rm_soh_item)
             db.commit()
             db.refresh(rm_soh_item)
