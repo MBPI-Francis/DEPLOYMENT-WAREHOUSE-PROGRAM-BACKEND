@@ -193,10 +193,14 @@ class StockOnHandService(AppService):
                         data.columns = data.iloc[0]  # Set first row as column headers
                         data = data[1:].reset_index(drop=True)  # Drop first row and reset index
 
-
-
-                        # Rename columns manually based on observed structure
-                        data.columns = ["A", "B", "C", "D", "E", "F", "G"]  # Adjust as needed
+                        # Check the number of columns and assign column names accordingly
+                        if len(data.columns) == 6:
+                            data.columns = ["A", "B", "C", "D", "E", "F"]  # Adjust for 6 columns
+                        elif len(data.columns) == 7:
+                            data.columns = ["A", "B", "C", "D", "E", "F", "G"]  # Adjust for 7 columns
+                        else:
+                            raise ValueError(
+                                f"Unexpected number of columns in WHSE# sheet in the Excel File: {len(data.columns)}")  # Raise an error if the column count is neither 6 nor 7
 
                         # Process specific columns (A, E, F) for each warehouse sheet
                         for _, row in data.iterrows():
