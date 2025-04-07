@@ -37,6 +37,7 @@ class TempHeldFormCRUD(AppCRUD):
         }).fetchone()  # or .fetchall() if expecting multiple rows
         result = record
 
+
         # This feature is required for the calculation
         if not result:
 
@@ -54,6 +55,10 @@ class TempHeldFormCRUD(AppCRUD):
             # Extract date_computed if record exists, else use None
             date_computed = existing_record[9] if existing_record else None
 
+            # Extract the stock_recalculation_count value
+            stock_recalculation_count = existing_record[10] if existing_record else None
+
+
 
             # Create a new StockOnHand record
             new_stock = StockOnHand(
@@ -61,11 +66,14 @@ class TempHeldFormCRUD(AppCRUD):
                 warehouse_id=held_form.warehouse_id,
                 rm_soh=0.00,
                 status_id=held_form.new_status_id,
-                date_computed=date_computed
+                date_computed=date_computed,
+                stock_recalculation_count=stock_recalculation_count
             )
+
             self.db.add(new_stock)
             self.db.commit()
             self.db.refresh(new_stock)
+
 
         held_form_item = TempHeldForm(
             rm_code_id=held_form.rm_code_id,

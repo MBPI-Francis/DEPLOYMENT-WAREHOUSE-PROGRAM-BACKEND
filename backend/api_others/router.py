@@ -313,30 +313,26 @@ async def clear_table_data(tbl: str, db: get_db = Depends()):
 async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, status_id: Optional[UUID]=None, db: get_db = Depends()):
     try:
 
-        # Check if the status id is null
-        if status_id:
-            query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-                                       WHERE warehouseid = '{warehouse_id}'
-                                               AND statusid = '{status_id}'
-                                               AND rawmaterialid = '{rm_id}'
-                                                """)
 
-        else:
-            query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-                            WHERE warehouseid = '{warehouse_id}'
-                                    AND rawmaterialid = '{rm_id}'
-                                    AND statusid IS NULL""")
-        result = db.execute(query)
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'
+                                            """)
+
+        result = db.execute(new_beginning_query)
         beginning_balance = result.fetchone()
         # Check if there is a record after executing the query
 
 
         if beginning_balance:
+
             # Check if the entered_qty is less or equal than the beginning balance
             #  Returns true if the entered quantity is less or equal
             # Returns false if the entered quantity exceeds
 
-            if float(entered_qty) <= float(beginning_balance[0]):
+            if float(beginning_balance[0]) >= entered_qty:
+
                 return True
 
             else:
@@ -350,33 +346,34 @@ async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, statu
 
 
 @router.get("/check/rm-stock-value/for-update/")
-async def check_stock_for_update(rm_id: UUID, warehouse_id: UUID, entered_qty: float, status_id: Optional[UUID]=None, db: get_db = Depends()):
+async def check_stock_for_update(rm_id: UUID,
+                                 warehouse_id: UUID,
+                                 prev_entered_qty: float,
+                                 new_entered_qty: float,
+                                 status_id: Optional[UUID]=None,
+                                 db: get_db = Depends()
+                                 ):
     try:
         # Check if the status id is null
-
-        query = text(f"""SELECT beginningbalance FROM public.view_beginning_soh
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'
+                                           AND rawmaterialid = '{rm_id}'    
                                             """)
 
-        result = db.execute(query)
-        beginning_balance = result.fetchone()
-        # Check if there is a record after executing the query
+        ending_balance_result = db.execute(ending_balance_query)
+        ending_balance = ending_balance_result.fetchone()
 
+        sum_of_beginning_and_entered_qty = float(ending_balance[0]) + float(prev_entered_qty)
+        print(sum_of_beginning_and_entered_qty)
 
-        if beginning_balance:
-            # Check if the entered_qty is less or equal than the beginning balance
-            #  Returns true if the entered quantity is less or equal
-            # Returns false if the entered quantity exceeds
+        difference = sum_of_beginning_and_entered_qty - float(new_entered_qty)
+        print(difference)
 
-            if float(entered_qty) <= float(beginning_balance[0]):
-                return True
-
-            else:
-                return False
-
+        if difference >= 0:
+            return True
         else:
             return False
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
