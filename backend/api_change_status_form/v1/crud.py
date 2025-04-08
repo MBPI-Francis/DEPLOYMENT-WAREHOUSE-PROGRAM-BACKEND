@@ -43,22 +43,15 @@ class TempHeldFormCRUD(AppCRUD):
 
 
             # Get the date computed date from other existing records
-            existing_query = text("""SELECT * FROM view_beginning_soh
-                                    WHERE rawmaterialid = :rm_code_id
-                                            AND statusid = :status_id""")
+            existing_query = text("""SELECT * FROM view_beginning_soh""")
 
-            existing_record = self.db.execute(existing_query, {
-                "rm_code_id": held_form.rm_code_id,
-                "status_id": held_form.current_status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
+            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
 
             # Extract date_computed if record exists, else use None
             date_computed = existing_record[9] if existing_record else None
 
             # Extract the stock_recalculation_count value
             stock_recalculation_count = existing_record[10] if existing_record else None
-
-
 
             # Create a new StockOnHand record
             new_stock = StockOnHand(

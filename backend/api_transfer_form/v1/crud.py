@@ -39,17 +39,15 @@ class TempTransferFormCRUD(AppCRUD):
         if not result:
 
             # Get the date computed date from other existing records
-            existing_query = text("""SELECT * FROM view_beginning_soh
-                                    WHERE rawmaterialid = :rm_code_id
-                                            AND statusid = :status_id""")
+            existing_query = text("""SELECT * FROM view_beginning_soh""")
 
-            existing_record = self.db.execute(existing_query, {
-                "rm_code_id": transfer_form.rm_code_id,
-                "status_id": transfer_form.status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
+            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
 
             # Extract date_computed if record exists, else use None
             date_computed = existing_record[9] if existing_record else None
+
+            # Extract the stock_recalculation_count value
+            stock_recalculation_count = existing_record[10] if existing_record else None
 
             # Create a new StockOnHand record
             new_stock = StockOnHand(
@@ -57,7 +55,8 @@ class TempTransferFormCRUD(AppCRUD):
                 warehouse_id=transfer_form.to_warehouse_id,
                 rm_soh=0.00,
                 status_id=transfer_form.status_id,
-                date_computed=date_computed  # Insert retrieved date_computed
+                date_computed=date_computed,  # Insert retrieved date_computed
+                stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
             )
             self.db.add(new_stock)
             self.db.commit()

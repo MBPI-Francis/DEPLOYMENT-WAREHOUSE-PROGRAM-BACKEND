@@ -47,17 +47,14 @@ class TempReceivingReportCRUD(AppCRUD):
         if not result:
 
             # Get the date computed date from other existing records
-            existing_query = text("""SELECT * FROM view_beginning_soh
-                                    WHERE rawmaterialid = :rm_code_id
-                                            AND statusid = :status_id""")
+            existing_query = text("""SELECT * FROM view_beginning_soh""")
 
-            existing_record = self.db.execute(existing_query, {
-                "rm_code_id": receiving_report.rm_code_id,
-                "status_id": status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
+            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
 
             # Extract date_computed if record exists, else use None
             date_computed = existing_record[9] if existing_record else None
+            # Extract the stock_recalculation_count value
+            stock_recalculation_count = existing_record[10] if existing_record else None
 
 
 
@@ -67,7 +64,8 @@ class TempReceivingReportCRUD(AppCRUD):
                 warehouse_id=receiving_report.warehouse_id,
                 rm_soh=0.00,
                 status_id=status_id,
-                date_computed=date_computed
+                date_computed=date_computed,
+                stock_recalculation_count=stock_recalculation_count
             )
             self.db.add(new_stock)
             self.db.commit()
