@@ -191,7 +191,7 @@ class StockOnHandService(AppService):
 
                         # Rename columns manually (shift column names down since the first row is actual data)
                         data.columns = data.iloc[0]  # Set first row as column headers
-                        data = data[1:].reset_index(drop=True)  # Drop first row and reset index
+                        data = data[0:].reset_index(drop=True)  # Drop first row and reset index
 
                         # Check the number of columns and assign column names accordingly
                         if len(data.columns) == 6:

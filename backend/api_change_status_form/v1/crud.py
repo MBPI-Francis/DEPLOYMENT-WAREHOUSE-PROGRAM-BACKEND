@@ -53,6 +53,8 @@ class TempHeldFormCRUD(AppCRUD):
             # Extract the stock_recalculation_count value
             stock_recalculation_count = existing_record[10] if existing_record else None
 
+
+
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=held_form.rm_code_id,

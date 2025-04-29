@@ -365,10 +365,8 @@ async def check_stock_for_update(rm_id: UUID,
         ending_balance = ending_balance_result.fetchone()
 
         sum_of_beginning_and_entered_qty = float(ending_balance[0]) + float(prev_entered_qty)
-        print(sum_of_beginning_and_entered_qty)
 
         difference = sum_of_beginning_and_entered_qty - float(new_entered_qty)
-        print(difference)
 
         if difference >= 0:
             return True
@@ -377,3 +375,83 @@ async def check_stock_for_update(rm_id: UUID,
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/check/preparation-form/validation")
+async def check_stock(rm_id: UUID,
+                      warehouse_id: UUID,
+                      qty_prep: float,
+                      qty_returned: float,
+                      status_id: Optional[UUID]=None,
+                      db: get_db = Depends()):
+    try:
+
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'
+                                            """)
+
+        result = db.execute(new_beginning_query)
+        beginning_balance = result.fetchone()
+
+    
+        # Check if there is a record after executing the query
+
+
+        if beginning_balance:
+
+            # Check if the entered_qty is less or equal than the beginning balance
+            #  Returns true if the consumption is less or equal
+            # Returns false if the consumption exceeds
+
+            consumption = qty_prep - qty_returned
+
+            if float(beginning_balance[0]) >= round(consumption, 2):
+    
+                return True
+
+            else:
+                return False
+
+        else:
+            return False
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/check/preparation-form/validation/for-update/")
+async def check_stock_for_update(rm_id: UUID,
+                                 warehouse_id: UUID,
+                                 prev_consumption: float,
+                                 new_consumption: float,
+                                 status_id: Optional[UUID]=None,
+                                 db: get_db = Depends()
+                                 ):
+    try:
+        # Check if the status id is null
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'    
+                                            """)
+
+        ending_balance_result = db.execute(ending_balance_query)
+        ending_balance = ending_balance_result.fetchone()
+
+        sum_of_beginning_and_prev_consumption = float(ending_balance[0]) + float(prev_consumption)
+
+    
+
+        difference = sum_of_beginning_and_prev_consumption - round(new_consumption, 2)
+
+        if difference >= 0:
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

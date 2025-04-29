@@ -45,7 +45,7 @@ class TempTransferFormCRUD(AppCRUD):
 
             # Extract date_computed if record exists, else use None
             date_computed = existing_record[9] if existing_record else None
-
+		
             # Extract the stock_recalculation_count value
             stock_recalculation_count = existing_record[10] if existing_record else None
 
@@ -56,7 +56,7 @@ class TempTransferFormCRUD(AppCRUD):
                 rm_soh=0.00,
                 status_id=transfer_form.status_id,
                 date_computed=date_computed,  # Insert retrieved date_computed
-                stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+ 		stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
             )
             self.db.add(new_stock)
             self.db.commit()
