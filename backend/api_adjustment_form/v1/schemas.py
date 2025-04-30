@@ -9,9 +9,11 @@ from datetime import date, datetime
 class AdjustmentForm(BaseModel):
     rm_code_id: UUID
     warehouse_id: UUID
-    ref_number: str = Field(max_length=50, description="The reference number of the Outgoing Report")
+    ref_number: str = Field(max_length=50, description="The reference number of the Adjustment Form")
     adjustment_date: date
     reference_date: date
+    ref_form: Optional[str] = Field(max_length=50, description="The referenced document of the adjustment")
+    ref_form_number: Optional[str] = Field(max_length=50, description="The referenced number of the referenced document")
     qty_kg: float
     status_id: UUID
     reason: str = Field(max_length=255, description="The reason for the adjustment")
@@ -33,6 +35,8 @@ class AdjustmentFormResponse(BaseModel):
     reason: str
     adjustment_date: date
     reference_date: date
+    ref_form: Optional[str] = None
+    ref_form_number: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     created_by: Optional[UUID] = None

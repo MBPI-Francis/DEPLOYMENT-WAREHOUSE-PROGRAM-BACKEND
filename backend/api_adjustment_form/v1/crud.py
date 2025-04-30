@@ -27,6 +27,8 @@ class AdjustmentFormCRUD(AppCRUD):
                                             qty_kg=adjustment_form.qty_kg,
                                             status_id = adjustment_form.status_id,
                                             reason=adjustment_form.reason,
+                                            ref_form=adjustment_form.ref_form,
+                                            ref_form_number=adjustment_form.ref_form_number,
                                             )
 
 
@@ -51,6 +53,8 @@ class AdjustmentFormCRUD(AppCRUD):
                 Status.name.label("status"),
                 AdjustmentForm.adjustment_date,
                 AdjustmentForm.reference_date,
+                AdjustmentForm.ref_form,
+                AdjustmentForm.ref_form_number,
                 AdjustmentForm.reason,
                 AdjustmentForm.created_at,
                 AdjustmentForm.updated_at,
@@ -95,6 +99,8 @@ class AdjustmentFormCRUD(AppCRUD):
                 AdjustmentForm.adjustment_date,
                 AdjustmentForm.reference_date,
                 AdjustmentForm.reason,
+                AdjustmentForm.ref_form,
+                AdjustmentForm.ref_form_number,
                 AdjustmentForm.created_at,
                 AdjustmentForm.updated_at,
                 AdjustmentForm.date_computed
@@ -129,6 +135,8 @@ class AdjustmentFormCRUD(AppCRUD):
                 AdjustmentForm.adjustment_date,
                 AdjustmentForm.reference_date,
                 AdjustmentForm.reason,
+                AdjustmentForm.ref_form,
+                AdjustmentForm.ref_form_number,
                 AdjustmentForm.created_at,
                 AdjustmentForm.updated_at,
                 AdjustmentForm.date_computed

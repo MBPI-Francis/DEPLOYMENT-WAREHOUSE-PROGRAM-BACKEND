@@ -15,6 +15,8 @@ class AdjustmentForm(Base):
     rm_code_id = Column(UUID(as_uuid=True), ForeignKey("tbl_raw_materials.id"), nullable=False)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("tbl_warehouses.id"), nullable=False)
     status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=False)
+    ref_form = Column(String(50), nullable=False, unique=False)
+    ref_form_number = Column(String(50), nullable=False, unique=False)
 
     ref_number = Column(String(50), nullable=False, unique=False)
     adjustment_date = Column(Date,nullable=False)
