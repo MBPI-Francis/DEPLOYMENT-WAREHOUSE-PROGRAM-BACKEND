@@ -445,17 +445,14 @@ async def check_stock_for_update(rm_id: UUID,
         ending_balance = ending_balance_result.fetchone()
 
 
-
         if float(prev_entered_qty) < 0:
             conv_positive_value = abs(float(prev_entered_qty))
-            result_of_beginning_and_entered_qty = conv_positive_value + float(ending_balance[0])
+            result_of_beginning_and_entered_qty = float(conv_positive_value) + float(ending_balance[0])
 
 
         else:
             result_of_beginning_and_entered_qty = float(ending_balance[0]) - float(prev_entered_qty)
 
-
-        print(new_entered_qty, result_of_beginning_and_entered_qty)
         ending_result = new_entered_qty + result_of_beginning_and_entered_qty
         if ending_result < 0:
             return False
