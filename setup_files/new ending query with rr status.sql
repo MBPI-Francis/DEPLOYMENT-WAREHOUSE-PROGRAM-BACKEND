@@ -31,7 +31,10 @@
            FROM rankedrecords
           WHERE rankedrecords.recalculation_count = (( SELECT max(rankedrecords_1.recalculation_count) AS max
                    FROM rankedrecords rankedrecords_1))
-        ), ogr_adjustments AS (
+        ), 
+
+		-- Outgoing Report
+		ogr_adjustments AS (
          SELECT ogr.warehouse_id AS warehouseid,
             ogr.rm_code_id AS rawmaterialid,
             sum(ogr.qty_kg) AS total_ogr_quantity,
@@ -41,9 +44,14 @@
            FROM tbl_outgoing_reports ogr
              JOIN tbl_warehouses wh ON ogr.warehouse_id = wh.id
              JOIN tbl_status status ON ogr.status_id = status.id
-          WHERE (ogr.is_cleared IS NULL OR ogr.is_cleared = false) AND (ogr.is_deleted IS NULL OR ogr.is_deleted = false) AND ogr.date_computed IS NULL
+          WHERE (ogr.is_cleared IS NULL OR ogr.is_cleared = false) 
+			  AND (ogr.is_deleted IS NULL OR ogr.is_deleted = false) 
+			  AND ogr.date_computed IS NULL
           GROUP BY ogr.warehouse_id, ogr.rm_code_id, ogr.date_computed, status.name, status.id
-        ), pf_adjustments AS (
+        ), 
+
+		-- Preparation Form
+		pf_adjustments AS (
          SELECT pf.warehouse_id AS warehouseid,
             pf.rm_code_id AS rawmaterialid,
             sum(pf.qty_prepared) AS total_prepared,
@@ -54,9 +62,14 @@
            FROM tbl_preparation_forms pf
              JOIN tbl_warehouses wh ON pf.warehouse_id = wh.id
              JOIN tbl_status status ON pf.status_id = status.id
-          WHERE (pf.is_cleared IS NULL OR pf.is_cleared = false) AND (pf.is_deleted IS NULL OR pf.is_deleted = false) AND pf.date_computed IS NULL
+          WHERE (pf.is_cleared IS NULL OR pf.is_cleared = false) 
+			  AND (pf.is_deleted IS NULL OR pf.is_deleted = false) 
+			  AND pf.date_computed IS NULL
           GROUP BY pf.warehouse_id, pf.rm_code_id, pf.date_computed, status.name, status.id
-        ), transferred_from AS (
+        ), 
+
+		-- Transfer Form (FROM)
+		transferred_from AS (
          SELECT tf.from_warehouse_id AS warehouseid,
             tf.rm_code_id AS rawmaterialid,
             - sum(tf.qty_kg) AS transferred_from_qty,
@@ -66,9 +79,14 @@
            FROM tbl_transfer_forms tf
              JOIN tbl_warehouses wh_from ON tf.from_warehouse_id = wh_from.id
              LEFT JOIN tbl_status status ON tf.status_id = status.id
-          WHERE (tf.is_cleared IS NULL OR tf.is_cleared = false) AND (tf.is_deleted IS NULL OR tf.is_deleted = false) AND tf.date_computed IS NULL
+          WHERE (tf.is_cleared IS NULL OR tf.is_cleared = false) 
+			  AND (tf.is_deleted IS NULL OR tf.is_deleted = false) 
+			  AND tf.date_computed IS NULL
           GROUP BY tf.from_warehouse_id, tf.rm_code_id, tf.date_computed, status.id, status.name
-        ), transferred_to AS (
+        ), 
+
+		-- Transfer Form (TO)
+		transferred_to AS (
          SELECT tf.to_warehouse_id AS warehouseid,
             tf.rm_code_id AS rawmaterialid,
             sum(tf.qty_kg) AS transferred_to_qty,
@@ -78,10 +96,13 @@
            FROM tbl_transfer_forms tf
              JOIN tbl_warehouses wh_to ON tf.to_warehouse_id = wh_to.id
              LEFT JOIN tbl_status status ON tf.status_id = status.id
-          WHERE (tf.is_cleared IS NULL OR tf.is_cleared = false) AND (tf.is_deleted IS NULL OR tf.is_deleted = false) AND tf.date_computed IS NULL
+          WHERE (tf.is_cleared IS NULL OR tf.is_cleared = false) 
+			  AND (tf.is_deleted IS NULL OR tf.is_deleted = false) 
+			  AND tf.date_computed IS NULL
           GROUP BY tf.to_warehouse_id, tf.rm_code_id, tf.date_computed, status.id, status.name
         ), 
-		
+
+		-- Receiving Report
 		rr_adjustments AS (
          SELECT rr.warehouse_id AS warehouseid,
             rr.rm_code_id AS rawmaterialid,
@@ -92,10 +113,15 @@
            FROM tbl_receiving_reports rr
 			JOIN tbl_warehouses wh ON rr.warehouse_id = wh.id
 			JOIN tbl_status status ON rr.status_id = status.id
-          WHERE (rr.is_cleared IS NULL OR rr.is_cleared = false) AND (rr.is_deleted IS NULL OR rr.is_deleted = false) AND rr.date_computed IS NULL
+          WHERE (rr.is_cleared IS NULL OR rr.is_cleared = false) 
+			  AND (rr.is_deleted IS NULL OR rr.is_deleted = false) 
+			  AND rr.date_computed IS NULL
           GROUP BY rr.warehouse_id, rr.rm_code_id, rr.date_computed, status.id, status.name
 		  
-        ), status_adjustments_eval AS (
+        ), 
+		
+		-- Change Status (Evaluation)
+		status_adjustments_eval AS (
          SELECT hf.warehouse_id AS warehouseid,
             hf.rm_code_id AS rawmaterialid,
             sum(
@@ -114,9 +140,15 @@
              JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
              JOIN tbl_status current_status ON hf.current_status_id = current_status.id
              JOIN tbl_status new_status ON hf.new_status_id = new_status.id
-          WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) AND (hf.is_deleted IS NULL OR hf.is_deleted = false) AND hf.date_computed IS NULL AND (new_status.name::text = 'held : under evaluation'::text OR current_status.name::text = 'held : under evaluation'::text)
+          WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) 
+		  	AND (hf.is_deleted IS NULL OR hf.is_deleted = false) 
+		  	AND hf.date_computed IS NULL 
+		  	AND (new_status.name::text = 'held : under evaluation'::text OR current_status.name::text = 'held : under evaluation'::text)
           GROUP BY hf.warehouse_id, hf.rm_code_id, hf.date_computed
-        ), status_adjustments_conta AS (
+        ), 
+		
+		-- Change Status (Contaminated)
+		status_adjustments_conta AS (
          SELECT hf.warehouse_id AS warehouseid,
             hf.rm_code_id AS rawmaterialid,
             sum(
@@ -135,9 +167,15 @@
              JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
              JOIN tbl_status current_status ON hf.current_status_id = current_status.id
              JOIN tbl_status new_status ON hf.new_status_id = new_status.id
-          WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) AND (hf.is_deleted IS NULL OR hf.is_deleted = false) AND hf.date_computed IS NULL AND (new_status.name::text = 'held : contaminated'::text OR current_status.name::text = 'held : contaminated'::text)
+          WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) 
+		  	AND (hf.is_deleted IS NULL OR hf.is_deleted = false) 
+		  	AND hf.date_computed IS NULL 
+		  	AND (new_status.name::text = 'held : contaminated'::text OR current_status.name::text = 'held : contaminated'::text)
           GROUP BY hf.warehouse_id, hf.rm_code_id, hf.date_computed
-        ), status_adjustments_rejec AS (
+        ), 
+		
+		-- Change Status (Rejected)
+		status_adjustments_rejec AS (
          SELECT hf.warehouse_id AS warehouseid,
             hf.rm_code_id AS rawmaterialid,
             sum(
@@ -156,9 +194,15 @@
              JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
              JOIN tbl_status current_status ON hf.current_status_id = current_status.id
              JOIN tbl_status new_status ON hf.new_status_id = new_status.id
-          WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) AND (hf.is_deleted IS NULL OR hf.is_deleted = false) AND hf.date_computed IS NULL AND (new_status.name::text = 'held : reject'::text OR current_status.name::text = 'held : reject'::text)
+          WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) 
+		  	AND (hf.is_deleted IS NULL OR hf.is_deleted = false) 
+			AND hf.date_computed IS NULL 
+		  	AND (new_status.name::text = 'held : reject'::text OR current_status.name::text = 'held : reject'::text)
           GROUP BY hf.warehouse_id, hf.rm_code_id, hf.date_computed
-        ), status_adjustments_good AS (
+        ), 
+		
+		-- Change Status (Good)
+		status_adjustments_good AS (
          SELECT hf.warehouse_id AS warehouseid,
             hf.rm_code_id AS rawmaterialid,
             sum(
@@ -178,7 +222,10 @@
              JOIN tbl_status new_status ON hf.new_status_id = new_status.id
           WHERE (hf.is_cleared IS NULL OR hf.is_cleared = false) AND (hf.is_deleted IS NULL OR hf.is_deleted = false) AND hf.date_computed IS NULL AND (new_status.name::text = 'good'::text OR current_status.name::text = 'good'::text)
           GROUP BY hf.warehouse_id, hf.rm_code_id, hf.date_computed
-        ), held_status_details AS (
+        ), 
+		
+		-- Held Status Details
+		held_status_details AS (
          SELECT hf.rm_code_id AS rawmaterialid,
             wh.wh_name AS warehousename,
             wh.id AS warehouseid,
@@ -194,7 +241,10 @@
              JOIN tbl_status new_status ON hf.new_status_id = new_status.id
           WHERE new_status.name::text ~~ 'held%'::text AND (hf.is_cleared IS NULL OR hf.is_cleared = false) AND (hf.is_deleted IS NULL OR hf.is_deleted = false) AND hf.date_computed IS NULL
           GROUP BY hf.rm_code_id, wh.wh_name, wh.wh_number, rm.rm_code, new_status.name, hf.date_computed, wh.id, hf.new_status_id
-        ), computed_statement AS (
+        ), 
+		
+		-- Main Computation Logic
+		computed_statement AS (
          SELECT ib.rawmaterialid,
             ib.rmcode,
             ib.warehouseid,
