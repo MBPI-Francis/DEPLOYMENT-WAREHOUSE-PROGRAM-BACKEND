@@ -4,7 +4,7 @@ from backend.api_change_status_form.v1.service import TempHeldFormService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/change_status_form/v1")
+router = APIRouter(prefix="/api/change_status_form/v1_spillage")
 
 @router.post("/create/", response_model=TempHeldForm)
 async def create_held_form(held_form: TempHeldFormCreate, db: get_db = Depends()):

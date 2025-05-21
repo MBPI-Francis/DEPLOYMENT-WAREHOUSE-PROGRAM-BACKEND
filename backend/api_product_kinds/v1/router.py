@@ -5,7 +5,7 @@ from backend.api_product_kinds.v1.service import ProductKindService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/product_kinds/v1")
+router = APIRouter(prefix="/api/product_kinds/v1_spillage")
 
 @router.post("/create/", response_model=ProductKindResponse)
 async def create_product_kind(product_kind: ProductKindCreate, db: get_db = Depends()):

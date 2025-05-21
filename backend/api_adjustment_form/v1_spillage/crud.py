@@ -11,29 +11,77 @@ from uuid import UUID
 from backend.api_raw_materials.v1.models import RawMaterial
 from backend.api_warehouses.v1.models import Warehouse
 from sqlalchemy import or_, desc
-from sqlalchemy import text
 
 
 # These are the code for the app to communicate to the database
 class AdjustmentFormCRUD(AppCRUD):
 
 
+    def create_adjustment_form(self, adjustment_form: AdjustmentFormCreate):
 
-    def get_deviation_report(self):
+        adjustment_form_item = AdjustmentForm(rm_code_id=adjustment_form.rm_code_id,
+                                            warehouse_id=adjustment_form.warehouse_id,
+                                            ref_number=adjustment_form.ref_number,
+                                            reference_date=adjustment_form.reference_date,
+                                            adjustment_date=adjustment_form.adjustment_date,
+                                            qty_kg=adjustment_form.qty_kg,
+                                            status_id = adjustment_form.status_id,
+                                            reason=adjustment_form.reason,
+                                            ref_form=adjustment_form.ref_form,
+                                            ref_form_number=adjustment_form.ref_form_number,
+                                            )
 
-        def get_qty_comparison(db: Session):
-            query = text("""
-                SELECT
-                    ove.rmcode AS rm,
-                    ove.qty AS francis_qty,
-                    ir.ending_Inv AS jarick_qty,
-                    (ove.qty - ir.ending_inv) AS deviation
-                FROM rm_overall_ending ove
-                INNER JOIN rm_inventory_report AS ir
-                    ON ove.rmcode = ir.matcode
-            """)
-            result = db.execute(query)
-            return result.fetchall()
+
+        self.db.add(adjustment_form_item)
+        self.db.commit()
+        self.db.refresh(adjustment_form_item)
+        # return self.get_adjustment_form()
+        return adjustment_form_item
+
+    def get_adjustment_form(self):
+        """
+             Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
+             """
+        # Join tables
+        stmt = (
+            self.db.query(
+                AdjustmentForm.id,
+                RawMaterial.rm_code.label("raw_material"),
+                AdjustmentForm.qty_kg,
+                AdjustmentForm.ref_number,
+                Warehouse.wh_name,
+                Status.name.label("status"),
+                AdjustmentForm.adjustment_date,
+                AdjustmentForm.reference_date,
+                AdjustmentForm.ref_form,
+                AdjustmentForm.ref_form_number,
+                AdjustmentForm.reason,
+                AdjustmentForm.created_at,
+                AdjustmentForm.updated_at,
+                AdjustmentForm.date_computed
+
+            )
+
+            .join(RawMaterial, AdjustmentForm.rm_code_id == RawMaterial.id)  # Join AdjustmentForm with RawMaterial
+            .join(Warehouse, AdjustmentForm.warehouse_id == Warehouse.id)  # Join AdjustmentForm with Warehouse
+            .join(Status, AdjustmentForm.status_id == Status.id)
+            .filter(
+                # Filter for records where is_cleared or is_deleted is NULL or False
+                or_(
+                    AdjustmentForm.is_cleared.is_(None),  # NULL check for is_cleared
+                    AdjustmentForm.is_cleared == False  # False check for is_cleared
+                ),
+                or_(
+                    AdjustmentForm.is_deleted.is_(None),  # NULL check for is_deleted
+                    AdjustmentForm.is_deleted == False  # False check for is_deleted
+                )
+            )
+
+            .order_by(desc(AdjustmentForm.created_at))  # Order from newest to oldest
+        )
+
+        # Return All the result
+        return stmt.all()
 
     def get_deleted_adjustment_form(self):
         """

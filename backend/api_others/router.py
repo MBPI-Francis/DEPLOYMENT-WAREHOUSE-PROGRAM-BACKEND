@@ -8,7 +8,7 @@ from uuid import UUID
 from backend.api_preparation_form.v1.models import TempPreparationForm
 from backend.api_notes.v1.models import TempNotes
 from backend.api_transfer_form.v1.models import TempTransferForm
-from backend.api_adjustment_form.v1.models import AdjustmentForm
+from backend.api_adjustment_form.v1_spillage.models import AdjustmentForm
 from backend.api_outgoing_report.v1.models import TempOutgoingReport
 from backend.api_receiving_report.v1.models import TempReceivingReport
 from backend.api_stock_on_hand.v1.models import StockOnHand

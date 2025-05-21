@@ -4,7 +4,7 @@ from backend.api_outgoing_report.v1.service import TempOutgoingReportService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/outgoing_reports/v1")
+router = APIRouter(prefix="/api/outgoing_reports/v1_spillage")
 
 @router.post("/create/", response_model=OutgoingForm)
 async def create_outgoing_report(outgoing_report: OutgoingFormCreate, db: get_db = Depends()):

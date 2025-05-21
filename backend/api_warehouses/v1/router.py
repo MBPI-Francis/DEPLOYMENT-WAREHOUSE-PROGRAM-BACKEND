@@ -5,7 +5,7 @@ from backend.api_warehouses.v1.service import WarehouseService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/warehouses/v1")
+router = APIRouter(prefix="/api/warehouses/v1_spillage")
 
 @router.post("/create/", response_model=WarehouseResponse)
 async def create_warehouse(warehouse: WarehouseCreate, db: get_db = Depends()):

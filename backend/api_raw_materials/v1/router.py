@@ -6,7 +6,7 @@ from backend.settings.database import get_db
 from uuid import UUID
 from fastapi.responses import JSONResponse
 
-router = APIRouter(prefix="/api/raw_materials/v1")
+router = APIRouter(prefix="/api/raw_materials/v1_spillage")
 
 @router.post("/create/", response_model=RawMaterialResponse)
 async def create_raw_material(raw_material: RawMaterialCreate, db: get_db = Depends()):
