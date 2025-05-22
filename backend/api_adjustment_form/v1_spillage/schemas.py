@@ -6,23 +6,26 @@ from typing import Optional
 from datetime import date, datetime
 
 
-class AdjustmentForm(BaseModel):
+class SpillageAdjustmentForm(BaseModel):
     rm_code_id: UUID
     warehouse_id: UUID
+    status_id: UUID
+    qty_kg: float
     ref_number: str = Field(max_length=50, description="The reference number of the Adjustment Form")
     adjustment_date: date
     reference_date: date
-    ref_form: str = Field(max_length=50, description="The referenced document of the adjustment")
-    ref_form_number: str = Field(max_length=50, description="The referenced number of the referenced document")
-    qty_kg: float
-    status_id: UUID
-    reason: str = Field(max_length=255, description="The reason for the adjustment")
 
-class AdjustmentFormCreate(AdjustmentForm):
+
+    spillage_form_number: str = Field(max_length=50)
+    incident_date: date
+    responsible_person: str = Field(max_length=50)
+
+
+class AdjustmentFormCreate(SpillageAdjustmentForm):
     created_by_id: Optional[UUID] = None
     updated_by_id: Optional[UUID] = None
 
-class AdjustmentFormUpdate(AdjustmentForm):
+class AdjustmentFormUpdate(SpillageAdjustmentForm):
     pass
 
 class AdjustmentFormResponse(BaseModel):
@@ -32,11 +35,11 @@ class AdjustmentFormResponse(BaseModel):
     ref_number: str
     wh_name: str
     status: str
-    reason: str
+    responsible_person: str
+    incident_date: date
+    spillage_form_number: str
     adjustment_date: date
     reference_date: date
-    ref_form: Optional[str] = None
-    ref_form_number: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     created_by: Optional[UUID] = None

@@ -5,7 +5,7 @@ from backend.api_users.v1.service import UserService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/users/v1_spillage")
+router = APIRouter(prefix="/api/users/v1")
 
 @router.post("/create/", response_model=UserResponse)
 async def create_user(department: UserCreate, db: get_db = Depends()):

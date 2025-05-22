@@ -7,7 +7,7 @@ from backend.settings.database import get_db
 from uuid import UUID
 from typing import List
 
-router = APIRouter(prefix="/api/status/v1_spillage")
+router = APIRouter(prefix="/api/status/v1")
 
 @router.post("/create/", response_model=StatusResponse)
 async def create_status(status: StatusCreate, db: get_db = Depends()):

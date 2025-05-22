@@ -4,7 +4,7 @@ from backend.api_adjustment_form.v1_spillage.service import AdjustmentFormServic
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/adjustment_form/v1_spillage")
+router = APIRouter(prefix="/api/adjustment_form/v1")
 
 @router.post("/create/", response_model=AdjustmentForm)
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):

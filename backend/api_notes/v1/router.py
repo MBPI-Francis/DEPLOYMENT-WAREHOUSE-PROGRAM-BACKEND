@@ -5,7 +5,7 @@ from backend.api_notes.v1.service import NotesService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/notes/v1_spillage")
+router = APIRouter(prefix="/api/notes/v1")
 
 @router.post("/create/", response_model=NotesResponse)
 async def create_notes(notes: NotesCreate, db: get_db = Depends()):

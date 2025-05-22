@@ -5,7 +5,7 @@ from backend.api_adjustment_form.v1_spillage.exceptions import (AdjustmentFormNo
                                                                 )
 from backend.api_status.v1.models import Status
 from backend.api_adjustment_form.v1_spillage.main import AppCRUD
-from backend.api_adjustment_form.v1_spillage.models import AdjustmentForm
+from backend.api_adjustment_form.v1_spillage.models import SpillageAdjustmentForm
 from backend.api_adjustment_form.v1_spillage.schemas import AdjustmentFormCreate, AdjustmentFormUpdate
 from uuid import UUID
 from backend.api_raw_materials.v1.models import RawMaterial
@@ -19,16 +19,17 @@ class AdjustmentFormCRUD(AppCRUD):
 
     def create_adjustment_form(self, adjustment_form: AdjustmentFormCreate):
 
-        adjustment_form_item = AdjustmentForm(rm_code_id=adjustment_form.rm_code_id,
+        adjustment_form_item = SpillageAdjustmentForm(
+                                            rm_code_id=adjustment_form.rm_code_id,
                                             warehouse_id=adjustment_form.warehouse_id,
                                             ref_number=adjustment_form.ref_number,
                                             reference_date=adjustment_form.reference_date,
                                             adjustment_date=adjustment_form.adjustment_date,
                                             qty_kg=adjustment_form.qty_kg,
                                             status_id = adjustment_form.status_id,
-                                            reason=adjustment_form.reason,
-                                            ref_form=adjustment_form.ref_form,
-                                            ref_form_number=adjustment_form.ref_form_number,
+                                            incident_date=adjustment_form.incident_date,
+                                            spillage_form_number=adjustment_form.spillage_form_number,
+                                            responsible_person=adjustment_form.responsible_person,
                                             )
 
 
@@ -45,39 +46,39 @@ class AdjustmentFormCRUD(AppCRUD):
         # Join tables
         stmt = (
             self.db.query(
-                AdjustmentForm.id,
+                SpillageAdjustmentForm.id,
                 RawMaterial.rm_code.label("raw_material"),
-                AdjustmentForm.qty_kg,
-                AdjustmentForm.ref_number,
+                SpillageAdjustmentForm.qty_kg,
+                SpillageAdjustmentForm.ref_number,
                 Warehouse.wh_name,
                 Status.name.label("status"),
-                AdjustmentForm.adjustment_date,
-                AdjustmentForm.reference_date,
-                AdjustmentForm.ref_form,
-                AdjustmentForm.ref_form_number,
-                AdjustmentForm.reason,
-                AdjustmentForm.created_at,
-                AdjustmentForm.updated_at,
-                AdjustmentForm.date_computed
+                SpillageAdjustmentForm.adjustment_date,
+                SpillageAdjustmentForm.reference_date,
+                SpillageAdjustmentForm.spillage_form_number,
+                SpillageAdjustmentForm.responsible_person,
+                SpillageAdjustmentForm.incident_date,
+                SpillageAdjustmentForm.created_at,
+                SpillageAdjustmentForm.updated_at,
+                SpillageAdjustmentForm.date_computed
 
             )
 
-            .join(RawMaterial, AdjustmentForm.rm_code_id == RawMaterial.id)  # Join AdjustmentForm with RawMaterial
-            .join(Warehouse, AdjustmentForm.warehouse_id == Warehouse.id)  # Join AdjustmentForm with Warehouse
-            .join(Status, AdjustmentForm.status_id == Status.id)
+            .join(RawMaterial, SpillageAdjustmentForm.rm_code_id == RawMaterial.id)  # Join SpillageAdjustmentForm with RawMaterial
+            .join(Warehouse, SpillageAdjustmentForm.warehouse_id == Warehouse.id)  # Join SpillageAdjustmentForm with Warehouse
+            .join(Status, SpillageAdjustmentForm.status_id == Status.id)
             .filter(
                 # Filter for records where is_cleared or is_deleted is NULL or False
                 or_(
-                    AdjustmentForm.is_cleared.is_(None),  # NULL check for is_cleared
-                    AdjustmentForm.is_cleared == False  # False check for is_cleared
+                    SpillageAdjustmentForm.is_cleared.is_(None),  # NULL check for is_cleared
+                    SpillageAdjustmentForm.is_cleared == False  # False check for is_cleared
                 ),
                 or_(
-                    AdjustmentForm.is_deleted.is_(None),  # NULL check for is_deleted
-                    AdjustmentForm.is_deleted == False  # False check for is_deleted
+                    SpillageAdjustmentForm.is_deleted.is_(None),  # NULL check for is_deleted
+                    SpillageAdjustmentForm.is_deleted == False  # False check for is_deleted
                 )
             )
 
-            .order_by(desc(AdjustmentForm.created_at))  # Order from newest to oldest
+            .order_by(desc(SpillageAdjustmentForm.created_at))  # Order from newest to oldest
         )
 
         # Return All the result
@@ -90,29 +91,29 @@ class AdjustmentFormCRUD(AppCRUD):
         # Join tables
         stmt = (
             self.db.query(
-                AdjustmentForm.id,
+                SpillageAdjustmentForm.id,
                 RawMaterial.rm_code.label("raw_material"),
-                AdjustmentForm.qty_kg,
-                AdjustmentForm.ref_number,
+                SpillageAdjustmentForm.qty_kg,
+                SpillageAdjustmentForm.ref_number,
                 Warehouse.wh_name,
                 Status.name.label("status"),
-                AdjustmentForm.adjustment_date,
-                AdjustmentForm.reference_date,
-                AdjustmentForm.reason,
-                AdjustmentForm.ref_form,
-                AdjustmentForm.ref_form_number,
-                AdjustmentForm.created_at,
-                AdjustmentForm.updated_at,
-                AdjustmentForm.date_computed
+                SpillageAdjustmentForm.adjustment_date,
+                SpillageAdjustmentForm.reference_date,
+                SpillageAdjustmentForm.spillage_form_number,
+                SpillageAdjustmentForm.responsible_person,
+                SpillageAdjustmentForm.incident_date,
+                SpillageAdjustmentForm.created_at,
+                SpillageAdjustmentForm.updated_at,
+                SpillageAdjustmentForm.date_computed
 
             )
 
-            .join(RawMaterial, AdjustmentForm.rm_code_id == RawMaterial.id)  # Join AdjustmentForm with RawMaterial
-            .join(Warehouse, AdjustmentForm.warehouse_id == Warehouse.id)  # Join AdjustmentForm with Warehouse
-            .join(Status, AdjustmentForm.status_id == Status.id)
+            .join(RawMaterial, SpillageAdjustmentForm.rm_code_id == RawMaterial.id)  # Join SpillageAdjustmentForm with RawMaterial
+            .join(Warehouse, SpillageAdjustmentForm.warehouse_id == Warehouse.id)  # Join SpillageAdjustmentForm with Warehouse
+            .join(Status, SpillageAdjustmentForm.status_id == Status.id)
             .filter(
-                    AdjustmentForm.is_cleared == True,  # False check for is_cleared
-                    AdjustmentForm.is_deleted == True  # False check for is_deleted
+                    SpillageAdjustmentForm.is_cleared == True,  # False check for is_cleared
+                    SpillageAdjustmentForm.is_deleted == True  # False check for is_deleted
             )
         )
 
@@ -126,32 +127,32 @@ class AdjustmentFormCRUD(AppCRUD):
         # Join tables
         stmt = (
             self.db.query(
-                AdjustmentForm.id,
+                SpillageAdjustmentForm.id,
                 RawMaterial.rm_code.label("raw_material"),
-                AdjustmentForm.qty_kg,
-                AdjustmentForm.ref_number,
+                SpillageAdjustmentForm.qty_kg,
+                SpillageAdjustmentForm.ref_number,
                 Warehouse.wh_name,
                 Status.name.label("status"),
-                AdjustmentForm.adjustment_date,
-                AdjustmentForm.reference_date,
-                AdjustmentForm.reason,
-                AdjustmentForm.ref_form,
-                AdjustmentForm.ref_form_number,
-                AdjustmentForm.created_at,
-                AdjustmentForm.updated_at,
-                AdjustmentForm.date_computed
+                SpillageAdjustmentForm.adjustment_date,
+                SpillageAdjustmentForm.reference_date,
+                SpillageAdjustmentForm.spillage_form_number,
+                SpillageAdjustmentForm.responsible_person,
+                SpillageAdjustmentForm.incident_date,
+                SpillageAdjustmentForm.created_at,
+                SpillageAdjustmentForm.updated_at,
+                SpillageAdjustmentForm.date_computed
 
             )
 
-            .join(RawMaterial, AdjustmentForm.rm_code_id == RawMaterial.id)  # Join AdjustmentForm with RawMaterial
-            .join(Warehouse, AdjustmentForm.warehouse_id == Warehouse.id)  # Join AdjustmentForm with Warehouse
-            .join(Status, AdjustmentForm.status_id == Status.id)
+            .join(RawMaterial, SpillageAdjustmentForm.rm_code_id == RawMaterial.id)  # Join SpillageAdjustmentForm with RawMaterial
+            .join(Warehouse, SpillageAdjustmentForm.warehouse_id == Warehouse.id)  # Join SpillageAdjustmentForm with Warehouse
+            .join(Status, SpillageAdjustmentForm.status_id == Status.id)
             .filter(
-                    # AdjustmentForm.is_cleared == True,  # False check for is_cleared
-                        AdjustmentForm.date_computed.is_not(None),
+                    # SpillageAdjustmentForm.is_cleared == True,  # False check for is_cleared
+                        SpillageAdjustmentForm.date_computed.is_not(None),
                     or_(
-                        AdjustmentForm.is_deleted.is_(None),  # NULL check for is_deleted
-                        AdjustmentForm.is_deleted == False  # False check for is_deleted
+                        SpillageAdjustmentForm.is_deleted.is_(None),  # NULL check for is_deleted
+                        SpillageAdjustmentForm.is_deleted == False  # False check for is_deleted
                     )
             )
         )
@@ -161,7 +162,7 @@ class AdjustmentFormCRUD(AppCRUD):
 
     def update_adjustment_form(self, adjustment_form_id: UUID, adjustment_form_update: AdjustmentFormUpdate):
         try:
-            adjustment_form = self.db.query(AdjustmentForm).filter(AdjustmentForm.id == adjustment_form_id).first()
+            adjustment_form = self.db.query(SpillageAdjustmentForm).filter(SpillageAdjustmentForm.id == adjustment_form_id).first()
             if not adjustment_form or adjustment_form.is_deleted:
                 raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already deleted.")
 
@@ -176,7 +177,7 @@ class AdjustmentFormCRUD(AppCRUD):
 
     def soft_delete_adjustment_form(self, adjustment_form_id: UUID):
         try:
-            adjustment_form = self.db.query(AdjustmentForm).filter(AdjustmentForm.id == adjustment_form_id).first()
+            adjustment_form = self.db.query(SpillageAdjustmentForm).filter(SpillageAdjustmentForm.id == adjustment_form_id).first()
             if not adjustment_form or adjustment_form.is_deleted:
                 raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already deleted.")
 
@@ -191,7 +192,7 @@ class AdjustmentFormCRUD(AppCRUD):
 
     def restore_adjustment_form(self, adjustment_form_id: UUID):
         try:
-            adjustment_form = self.db.query(AdjustmentForm).filter(AdjustmentForm.id == adjustment_form_id).first()
+            adjustment_form = self.db.query(SpillageAdjustmentForm).filter(SpillageAdjustmentForm.id == adjustment_form_id).first()
             if not adjustment_form or not adjustment_form.is_deleted:
                 raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already restored.")
 

@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends
-from backend.api_adjustment_form.v1_spillage.schemas import AdjustmentFormCreate, AdjustmentFormUpdate, AdjustmentFormResponse, AdjustmentForm
+from backend.api_adjustment_form.v1_spillage.schemas import AdjustmentFormCreate, AdjustmentFormUpdate, AdjustmentFormResponse, SpillageAdjustmentForm
 from backend.api_adjustment_form.v1_spillage.service import AdjustmentFormService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/adjustment_form/v1_spillage")
+router = APIRouter(prefix="/api/adjustment_form/spillage/v1")
 
-@router.post("/create/", response_model=AdjustmentForm)
+@router.post("/create/", response_model=SpillageAdjustmentForm)
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
     result = AdjustmentFormService(db).create_adjustment_form(adjustment_form)
     return result

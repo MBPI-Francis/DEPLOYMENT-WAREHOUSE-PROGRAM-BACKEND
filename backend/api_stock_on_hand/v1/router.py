@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi.responses import JSONResponse
 from typing import List
 
-router = APIRouter(prefix="/api/rm_stock_on_hand/v1_spillage")
+router = APIRouter(prefix="/api/rm_stock_on_hand/v1")
 
 @router.post("/create/", response_model=StockOnHandResponse)
 async def create_rm_soh(rm_soh: StockOnHandCreate, db: get_db = Depends()):

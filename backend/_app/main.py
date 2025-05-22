@@ -14,7 +14,9 @@ from backend.api_preparation_form.v1 import router as temp_preparation_form_rout
 from backend.api_change_status_form.v1 import router as temp_held_form_router
 from backend.api_others import router as create_view_router
 from backend.settings.database import engine, Base
-from backend.settings.create_view_table import create_ending_view_table, create_beginning_view_table
+from backend.settings.create_view_table import (create_ending_view_table,
+                                                create_beginning_view_table,
+                                                create_adjusted_ending_view_table)
 from backend.settings.create_product_kind import create_product_kind
 from backend.api_adjustment_form.v1_spillage import router as adjustment_form_router
 
@@ -31,7 +33,7 @@ def startup_event():
     create_beginning_view_table()  # Automatically create the view
     create_ending_view_table()
     create_product_kind()
-
+    create_adjusted_ending_view_table()
 
 
 # These code includes all the routers/endpoint of the api_users

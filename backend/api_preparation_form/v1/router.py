@@ -4,7 +4,7 @@ from backend.api_preparation_form.v1.service import TempPreparationFormService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/preparation_forms/v1_spillage")
+router = APIRouter(prefix="/api/preparation_forms/v1")
 
 @router.post("/create/", response_model=TempPreparationForm)
 async def create_preparation_form(preparation_form: TempPreparationFormCreate, db: get_db = Depends()):

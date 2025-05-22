@@ -8,7 +8,7 @@ from uuid import UUID
 from backend.api_preparation_form.v1.models import TempPreparationForm
 from backend.api_notes.v1.models import TempNotes
 from backend.api_transfer_form.v1.models import TempTransferForm
-from backend.api_adjustment_form.v1_spillage.models import AdjustmentForm
+from backend.api_adjustment_form.v1_spillage.models import SpillageAdjustmentForm
 from backend.api_outgoing_report.v1.models import TempOutgoingReport
 from backend.api_receiving_report.v1.models import TempReceivingReport
 from backend.api_stock_on_hand.v1.models import StockOnHand
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api")
 @router.get("/get/new_soh/")
 async def get_new_soh(db: get_db = Depends()):
     try:
-        query = text("SELECT * FROM view_ending_stocks_balance WHERE new_beginning_balance != 0.00")
+        query = text("SELECT * FROM view_adjusted_ending_balance WHERE new_beginning_balance != 0.00")
         result = db.execute(query)
         rows = result.fetchall()
         # Convert rows to a list of dictionaries
@@ -41,7 +41,7 @@ async def get_new_soh(db: get_db = Depends()):
 @router.get("/get/new_soh/with_zero/")
 async def get_new_soh(db: get_db = Depends()):
     try:
-        query = text("SELECT * FROM view_ending_stocks_balance")
+        query = text("SELECT * FROM view_adjusted_ending_balance")
         result = db.execute(query)
         rows = result.fetchall()
         # Convert rows to a list of dictionaries
@@ -82,15 +82,28 @@ async def get_record(
         db: get_db = Depends()):
     try:
 
+        # # Check if the status id is null
+        # if status_id:
+        #     query = text(f"""SELECT * FROM view_ending_stocks_balance
+        #                                WHERE warehouseid = '{warehouse_id}'
+        #                                        AND statusid = '{status_id}'
+        #                                        AND rawmaterialid = '{rm_id}'""")
+        #
+        # else:
+        #     query = text(f"""SELECT * FROM view_ending_stocks_balance
+        #                     WHERE warehouseid = '{warehouse_id}'
+        #                             AND rawmaterialid = '{rm_id}'""")
+
+
         # Check if the status id is null
         if status_id:
-            query = text(f"""SELECT * FROM view_ending_stocks_balance
+            query = text(f"""SELECT * FROM view_adjusted_ending_balance
                                        WHERE warehouseid = '{warehouse_id}'
                                                AND statusid = '{status_id}'
                                                AND rawmaterialid = '{rm_id}'""")
 
         else:
-            query = text(f"""SELECT * FROM view_ending_stocks_balance
+            query = text(f"""SELECT * FROM view_adjusted_ending_balance
                             WHERE warehouseid = '{warehouse_id}'
                                     AND rawmaterialid = '{rm_id}'""")
         result = db.execute(query)
@@ -145,7 +158,7 @@ async def update_date_computed(db: get_db = Depends()):
         TempOutgoingReport,
         TempReceivingReport,
         TempHeldForm,
-        AdjustmentForm,
+        SpillageAdjustmentForm,
     ]
 
     updated_tables = []
@@ -171,7 +184,8 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
     """
 
     params_date = datetime.strptime(params_date, "%Y-%m-%d").strftime("%m/%d/%Y")
-    query = text("SELECT * FROM view_ending_stocks_balance")
+    # query = text("SELECT * FROM view_ending_stocks_balance")
+    query = text("SELECT * FROM view_adjusted_ending_balance")
 
     def get_latest_count():
         # Get the largest stock recalculation count
@@ -293,7 +307,7 @@ async def clear_table_data(tbl: str, db: get_db = Depends()):
 
     elif tbl == 'adjustment forms':
         tables = [
-            AdjustmentForm,
+            SpillageAdjustmentForm,
         ]
 
     elif tbl == 'all':
@@ -304,7 +318,7 @@ async def clear_table_data(tbl: str, db: get_db = Depends()):
             TempOutgoingReport,
             TempReceivingReport,
             TempHeldForm,
-            AdjustmentForm,
+            SpillageAdjustmentForm,
         ]
 
     updated_tables = []
@@ -322,7 +336,14 @@ async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, statu
     try:
 
 
-        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
                                            AND rawmaterialid = '{rm_id}'
@@ -360,7 +381,13 @@ async def check_stock_value(rm_id: UUID,
     try:
 
 
-        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
                                            AND rawmaterialid = '{rm_id}'
@@ -377,7 +404,8 @@ async def check_stock_value(rm_id: UUID,
             #  Returns true if the entered quantity is less or equal
             # Returns false if the entered quantity exceeds
 
-            ending_result =  entered_qty + float(beginning_balance[0])
+            ending_result =  float(beginning_balance[0]) - entered_qty
+            print(float(ending_result))
             if ending_result < 0:
                 return False
 
@@ -402,7 +430,13 @@ async def check_stock_for_update(rm_id: UUID,
                                  ):
     try:
         # Check if the status id is null
-        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
                                            AND rawmaterialid = '{rm_id}'    
@@ -435,7 +469,14 @@ async def check_stock_for_update(rm_id: UUID,
                                  ):
     try:
         # Check if the status id is null
-        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
                                            AND rawmaterialid = '{rm_id}'    
@@ -476,7 +517,14 @@ async def check_stock(rm_id: UUID,
     try:
 
 
-        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
                                            AND rawmaterialid = '{rm_id}'
@@ -520,7 +568,14 @@ async def check_stock_for_update(rm_id: UUID,
                                  ):
     try:
         # Check if the status id is null
-        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
                                    WHERE warehouseid = '{warehouse_id}'
                                            AND statusid = '{status_id}'
                                            AND rawmaterialid = '{rm_id}'    

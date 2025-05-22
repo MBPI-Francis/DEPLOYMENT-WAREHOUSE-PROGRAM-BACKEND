@@ -8,21 +8,22 @@ from backend.api_users.v1.models import User
 
 
 # Parent Model: Department
-class AdjustmentForm(Base):
-    __tablename__ = "tbl_adjustment_form"
+class SpillageAdjustmentForm(Base):
+    __tablename__ = "tbl_adjustment_spillage"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     rm_code_id = Column(UUID(as_uuid=True), ForeignKey("tbl_raw_materials.id"), nullable=False)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("tbl_warehouses.id"), nullable=False)
     status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=False)
-    ref_form = Column(String(50), nullable=False, unique=False)
-    ref_form_number = Column(String(50), nullable=False, unique=False)
 
     ref_number = Column(String(50), nullable=False, unique=False)
     adjustment_date = Column(Date,nullable=False)
     reference_date = Column(Date,nullable=False)
     qty_kg = Column(Numeric(10, 2), nullable=False)
-    reason = Column(String(255), nullable=False)
+
+    spillage_form_number = Column(String(50), nullable=False, unique=False)
+    incident_date = Column(Date,nullable=False)
+    responsible_person = Column(String(50), nullable=False)
 
     is_deleted = Column(Boolean, default=False)
 
