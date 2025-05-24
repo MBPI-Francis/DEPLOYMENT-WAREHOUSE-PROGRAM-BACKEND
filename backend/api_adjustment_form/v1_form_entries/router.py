@@ -1,15 +1,43 @@
 from fastapi import APIRouter, Depends
-from backend.api_adjustment_form.v1_spillage.schemas import AdjustmentFormCreate, AdjustmentFormUpdate, AdjustmentFormResponse, AdjustmentForm
-from backend.api_adjustment_form.v1_spillage.service import AdjustmentFormService
+from backend.api_adjustment_form.v1_form_entries.schemas import AdjustmentFormCreate, AdjustmentFormUpdate, AdjustmentFormResponse, AdjustmentForm
+from backend.api_adjustment_form.v1_form_entries.service import AdjustmentFormService
 from backend.settings.database import get_db
 from uuid import UUID
 
-router = APIRouter(prefix="/api/adjustment_form/v1")
+router = APIRouter(prefix="/api/adjustment_form/form_entries/v1")
 
-@router.post("/create/", response_model=AdjustmentForm)
+@router.post("/create/receiving_form/", response_model=AdjustmentForm)
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
-    result = AdjustmentFormService(db).create_adjustment_form(adjustment_form)
+    form = "receiving form"
+    result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
     return result
+
+@router.post("/create/outgoing_form/", response_model=AdjustmentForm)
+async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
+    form = "outgoing form"
+    result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
+    return result
+
+@router.post("/create/preparation_form/", response_model=AdjustmentForm)
+async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
+    form = "preparation form"
+    result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
+    return result
+
+
+@router.post("/create/transfer_form/", response_model=AdjustmentForm)
+async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
+    form = "transfer form"
+    result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
+    return result
+
+
+@router.post("/create/change_status_form/", response_model=AdjustmentForm)
+async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
+    form = "change status form"
+    result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
+    return result
+
 
 @router.get("/list/", response_model=list[AdjustmentFormResponse])
 async def read_adjustment_form(db: get_db = Depends()):

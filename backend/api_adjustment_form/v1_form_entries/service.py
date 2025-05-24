@@ -1,16 +1,16 @@
-from backend.api_adjustment_form.v1_spillage.exceptions import AdjustmentFormCreateException, AdjustmentFormNotFoundException
-from backend.api_adjustment_form.v1_spillage.main import AppService
-from backend.api_adjustment_form.v1_spillage.schemas import AdjustmentFormCreate, AdjustmentFormUpdate
+from backend.api_adjustment_form.v1_form_entries.exceptions import AdjustmentFormCreateException, AdjustmentFormNotFoundException
+from backend.api_adjustment_form.v1_form_entries.main import AppService
+from backend.api_adjustment_form.v1_form_entries.schemas import AdjustmentFormCreate, AdjustmentFormUpdate
 from uuid import UUID
-from backend.api_adjustment_form.v1_spillage.crud import AdjustmentFormCRUD
+from backend.api_adjustment_form.v1_form_entries.crud import AdjustmentFormCRUD
 
 
 
 # These are the code for the business logic like calculation etc.
 class AdjustmentFormService(AppService):
-    def create_adjustment_form(self, item: AdjustmentFormCreate):
+    def create_adjustment_form(self, item: AdjustmentFormCreate, form: str):
         try:
-            adjustment_form_item = AdjustmentFormCRUD(self.db).create_adjustment_form(item)
+            adjustment_form_item = AdjustmentFormCRUD(self.db).create_adjustment_form(item, form)
 
         except Exception as e:
             raise AdjustmentFormCreateException(detail=f"Error: {str(e)}")

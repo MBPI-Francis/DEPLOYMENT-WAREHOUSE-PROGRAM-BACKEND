@@ -21,6 +21,8 @@ class AdjustmentFormParent(Base):
     adjustment_date = Column(Date, nullable=False)
     referenced_date = Column(Date, nullable=False)
 
+    # One-to-One relationship
+    adjustment_child = relationship("AdjustmentFormCorrect", back_populates="adjustment_parent", uselist=False, cascade="all, delete")
 
 
 
@@ -37,7 +39,7 @@ class AdjustmentFormCorrect(Base):
     incorrect_change_status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_held_forms.id"), nullable=True)
 
     # Common references
-    adjustment_parent_id = Column(UUID(as_uuid=True), ForeignKey("tbl_adjustment_parent.id"), nullable=False)
+    adjustment_parent_id = Column(UUID(as_uuid=True), ForeignKey("tbl_adjustment_parent.id"), unique=True,nullable=False)
     rm_code_id = Column(UUID(as_uuid=True), ForeignKey("tbl_raw_materials.id"), nullable=False)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("tbl_warehouses.id"), nullable=True)
     from_warehouse_id = Column(UUID(as_uuid=True), ForeignKey("tbl_warehouses.id"), nullable=True)
@@ -47,9 +49,9 @@ class AdjustmentFormCorrect(Base):
     new_status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=True)
     status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=True)
 
-    qty = Column(Numeric(10, 2), nullable=True)
+    qty_kg = Column(Numeric(10, 2), nullable=True)
     qty_prepared = Column(Numeric(10, 2), nullable=True)
-    qty_returned = Column(Numeric(10, 2), nullable=True)
+    qty_return = Column(Numeric(10, 2), nullable=True)
 
     is_deleted = Column(Boolean, default=False)
     is_cleared = Column(Boolean, default=False)
@@ -83,8 +85,7 @@ class AdjustmentFormCorrect(Base):
     incorrect_outgoing = relationship("TempOutgoingReport", foreign_keys=[incorrect_outgoing_id], backref="outgoing_adjustments")
     incorrect_transfer = relationship("TempTransferForm", foreign_keys=[incorrect_transfer_id], backref="transfer_adjustments")
     incorrect_change_status = relationship("TempHeldForm", foreign_keys=[incorrect_change_status_id], backref="change_status_adjustments")
-    adjustment_parent = relationship("AdjustmentFormParent", foreign_keys=[adjustment_parent_id],
-                                           backref="parent_adjustments")
+    adjustment_parent = relationship("AdjustmentFormParent", back_populates="adjustment_child")
 
 
 
