@@ -14,7 +14,7 @@ class AdjustmentFormParent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     # Metadata
     responsible_person = Column(String(30),
-                             nullable=False)
+                             nullable=True)
     adjustment_type = Column(String(20),
                              nullable=False)  # e.g., "System Entry Error or Paper Form Error"
     ref_number = Column(String(50), nullable=False)

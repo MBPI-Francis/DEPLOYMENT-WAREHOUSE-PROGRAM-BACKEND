@@ -6,33 +6,33 @@ from uuid import UUID
 
 router = APIRouter(prefix="/api/adjustment_form/form_entries/v1")
 
-@router.post("/create/receiving_form/", response_model=AdjustmentForm)
+@router.post("/create/receiving_form/")
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
     form = "receiving form"
     result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
     return result
 
-@router.post("/create/outgoing_form/", response_model=AdjustmentForm)
+@router.post("/create/outgoing_form/")
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
     form = "outgoing form"
     result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
     return result
 
-@router.post("/create/preparation_form/", response_model=AdjustmentForm)
+@router.post("/create/preparation_form/")
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
     form = "preparation form"
     result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
     return result
 
 
-@router.post("/create/transfer_form/", response_model=AdjustmentForm)
+@router.post("/create/transfer_form/")
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
     form = "transfer form"
     result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)
     return result
 
 
-@router.post("/create/change_status_form/", response_model=AdjustmentForm)
+@router.post("/create/change_status_form/")
 async def create_adjustment_form(adjustment_form: AdjustmentFormCreate, db: get_db = Depends()):
     form = "change status form"
     result = AdjustmentFormService(db).create_adjustment_form(adjustment_form, form)

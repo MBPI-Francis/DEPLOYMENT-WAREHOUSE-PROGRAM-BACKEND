@@ -19,6 +19,7 @@ from backend.settings.create_view_table import (create_ending_view_table,
                                                 create_adjusted_ending_view_table)
 from backend.settings.create_product_kind import create_product_kind
 from backend.api_adjustment_form.v1_spillage import router as adjustment_form_router
+from backend.api_adjustment_form.v1_form_entries import router as adjustment_form_form_entries_router
 
 
 
@@ -80,6 +81,11 @@ app.include_router(create_view_router.router)
 
 # These code includes all the routers/endpoint of the api_adjustment_form
 app.include_router(adjustment_form_router.router)
+
+
+# These code includes all the routers/endpoint of the api_adjustment_form
+app.include_router(adjustment_form_form_entries_router.router)
+
 
 # Code for Creating database tables
 Base.metadata.create_all(bind=engine)

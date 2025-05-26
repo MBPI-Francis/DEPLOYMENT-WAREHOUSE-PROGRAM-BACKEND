@@ -12,7 +12,7 @@ class AdjustmentForm(BaseModel):
     # Common fields for all the forms
     ref_number: str = Field(max_length=50, description="The reference number of the Adjustment Form")
     adjustment_date: date
-    reference_date: date
+    referenced_date: date
     adjustment_type: str = Field(max_length=50, description="The type of adjustment")
     responsible_person: Optional[str] = None
 
@@ -31,11 +31,18 @@ class AdjustmentForm(BaseModel):
     from_warehouse_id: Optional[UUID] = None
     to_warehouse_id: Optional[UUID] = None
 
+
     # Fields for Change Status Form
     current_status_id: Optional[UUID] = None
     new_status_id: Optional[UUID] = None
 
 
+    # FORM IDs
+    incorrect_receiving_id: Optional[UUID] = None
+    incorrect_outgoing_id: Optional[UUID] = None
+    incorrect_preparation_id: Optional[UUID] = None
+    incorrect_transfer_id: Optional[UUID] = None
+    incorrect_change_status_id: Optional[UUID] = None
 
 class AdjustmentFormCreate(AdjustmentForm):
     created_by_id: Optional[UUID] = None
@@ -57,10 +64,10 @@ class AdjustmentFormResponse(BaseModel):
     ref_number: str
     responsible_person: Optional[str] = None
     raw_material: str
-    qty_kg: Optional[str] = None
+    qty_kg: Optional[float] = None
 
-    qty_prepared: Optional[str] = None
-    qty_return: Optional[str] = None
+    qty_prepared: Optional[float] = None
+    qty_return: Optional[float] = None
 
 
 
