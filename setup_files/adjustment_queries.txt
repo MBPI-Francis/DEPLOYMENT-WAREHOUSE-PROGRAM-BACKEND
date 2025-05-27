@@ -1,0 +1,251 @@
+---------------------------[Receiving Form Queries]---------------------------
+CORRECT:
+ SELECT tac.warehouse_id AS warehouseid,
+    tac.rm_code_id AS rawmaterialid,
+    sum(tac.qty_kg) AS total_received,
+    tac.date_computed AS datecomputed,
+    status.name AS statusname,
+    status.id AS statusid
+   FROM tbl_adjustment_correct tac
+     JOIN tbl_adjustment_parent tap ON tac.adjustment_parent_id = tap.id
+     JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
+     JOIN tbl_status status ON tac.status_id = status.id
+  WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false) AND (tac.is_deleted IS NULL OR tac.is_deleted = false) AND tac.date_computed IS NULL
+  GROUP BY tac.warehouse_id, tac.rm_code_id, tac.date_computed, status.id, status.name;
+
+
+INCORRECT:
+ SELECT rr.warehouse_id AS warehouseid,
+    rr.rm_code_id AS rawmaterialid,
+    sum(rr.qty_kg) AS total_received,
+    rr.date_computed AS datecomputed,
+    status.name AS statusname,
+    status.id AS statusid
+   FROM tbl_adjustment_correct tac
+     JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
+     JOIN tbl_status status ON tac.status_id = status.id
+     JOIN tbl_receiving_reports rr ON tac.incorrect_receiving_id = rr.id
+  WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false) AND (tac.is_deleted IS NULL OR tac.is_deleted = false) AND tac.date_computed IS NULL
+  GROUP BY rr.warehouse_id, rr.rm_code_id, rr.date_computed, status.id, status.name;
+
+
+
+
+---------------------------[Outgoing Form Queries]---------------------------
+CORRECT:
+     SELECT tac.warehouse_id AS warehouseid,
+        tac.rm_code_id AS rawmaterialid,
+        sum(tac.qty_kg) AS total_ogr_qty,
+        tac.date_computed AS datecomputed,
+        status.name AS statusname,
+        status.id AS statusid
+       FROM tbl_adjustment_correct tac
+         JOIN tbl_outgoing_reports ogr ON tac.incorrect_outgoing_id = ogr.id
+         JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
+         JOIN tbl_status status ON tac.status_id = status.id
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false) AND (tac.is_deleted IS NULL OR tac.is_deleted = false) AND tac.date_computed IS NULL
+      GROUP BY tac.warehouse_id, tac.rm_code_id, tac.date_computed, status.id, status.name;
+
+
+
+INCORRECT:
+     SELECT ogr.warehouse_id AS warehouseid,
+        ogr.rm_code_id AS rawmaterialid,
+        sum(ogr.qty_kg) AS total_ogr_qty,
+        ogr.date_computed AS datecomputed,
+        status.name AS statusname,
+        status.id AS statusid
+       FROM tbl_adjustment_correct tac
+         JOIN tbl_outgoing_reports ogr ON tac.incorrect_outgoing_id = ogr.id
+         JOIN tbl_warehouses wh ON ogr.warehouse_id = wh.id
+         JOIN tbl_status status ON ogr.status_id = status.id
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false) AND (tac.is_deleted IS NULL OR tac.is_deleted = false) AND tac.date_computed IS NULL
+      GROUP BY ogr.warehouse_id, ogr.rm_code_id, ogr.date_computed, status.id, status.name;
+
+
+
+
+---------------------------[Preparation Form Queries]---------------------------
+CORRECT:
+ SELECT tac.warehouse_id AS warehouseid,
+    tac.rm_code_id AS rawmaterialid,
+    sum(tac.qty_prepared) AS total_prepared,
+    sum(tac.qty_return) AS total_returned,
+    tac.date_computed AS datecomputed,
+    status.name AS statusname,
+    status.id AS statusid
+   FROM tbl_adjustment_correct tac
+     JOIN tbl_preparation_forms pf ON tac.incorrect_preparation_id = pf.id
+     JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
+     JOIN tbl_status status ON tac.status_id = status.id
+  WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false) AND (tac.is_deleted IS NULL OR tac.is_deleted = false) AND tac.date_computed IS NULL
+  GROUP BY tac.warehouse_id, tac.rm_code_id, tac.date_computed, status.id, status.name;
+
+
+
+INCORRECT:
+
+     SELECT pf.warehouse_id AS warehouseid,
+        pf.rm_code_id AS rawmaterialid,
+        sum(pf.qty_prepared) AS total_prepared,
+        sum(pf.qty_return) AS total_returned,
+        pf.date_computed AS datecomputed,
+        status.name AS statusname,
+        status.id AS statusid
+       FROM tbl_adjustment_correct tac
+         JOIN tbl_preparation_forms pf ON tac.incorrect_preparation_id = pf.id
+         JOIN tbl_warehouses wh ON pf.warehouse_id = wh.id
+         JOIN tbl_status status ON pf.status_id = status.id
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false) AND (tac.is_deleted IS NULL OR tac.is_deleted = false) AND tac.date_computed IS NULL
+      GROUP BY pf.warehouse_id, pf.rm_code_id, pf.date_computed, status.id, status.name;
+
+
+
+
+---------------------------[Transfer Form Queries]---------------------------
+WAREHOUSE FROM: CORRECT
+
+     SELECT tac.from_warehouse_id AS warehouseid,
+        tac.rm_code_id AS rawmaterialid,
+        - sum(tac.qty_kg) AS transferred_from_qty,
+        tac.date_computed AS datecomputed,
+        status.id AS statusid,
+        status.name AS statusname
+    FROM tbl_adjustment_correct tac
+        JOIN tbl_transfer_forms tf ON tac.incorrect_transfer_id = tf.id
+        JOIN tbl_warehouses wh_from ON tac.from_warehouse_id = wh_from.id
+        JOIN tbl_status status ON tac.status_id = status.id
+
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
+        AND (tac.is_deleted IS NULL
+        OR tac.is_deleted = false)
+        AND tac.date_computed IS NULL
+      GROUP BY 	tac.from_warehouse_id,
+                tac.rm_code_id,
+                tac.date_computed,
+                status.id,
+                status.name
+
+
+WAREHOUSE FROM: INCORRECT
+
+    SELECT tf.from_warehouse_id AS warehouseid,
+        tf.rm_code_id AS rawmaterialid,
+        sum(tf.qty_kg) AS transferred_from_qty,
+        tf.date_computed AS datecomputed,
+        status.id AS statusid,
+        status.name AS statusname
+    FROM tbl_adjustment_correct tac
+        JOIN tbl_transfer_forms tf ON tac.incorrect_transfer_id = tf.id
+        JOIN tbl_warehouses wh_from ON tf.from_warehouse_id = wh_from.id
+        JOIN tbl_status status ON tf.status_id = status.id
+
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
+        AND (tac.is_deleted IS NULL
+        OR tac.is_deleted = false)
+        AND tac.date_computed IS NULL
+      GROUP BY 	tf.from_warehouse_id,
+                tf.rm_code_id,
+                tf.date_computed,
+                status.id,
+                status.name
+
+
+WAREHOUSE TO: CORRECT
+
+    SELECT tac.to_warehouse_id AS warehouseid,
+        tac.rm_code_id AS rawmaterialid,
+        sum(tac.qty_kg) AS transferred_to_qty,
+        tac.date_computed AS datecomputed,
+        status.id AS statusid,
+        status.name AS statusname
+    FROM tbl_adjustment_correct tac
+    JOIN tbl_transfer_forms tf ON tac.incorrect_transfer_id = tf.id
+    JOIN tbl_warehouses wh_to ON tac.to_warehouse_id = wh_to.id
+    JOIN tbl_status status ON tac.status_id = status.id
+
+    WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
+        AND (tac.is_deleted IS NULL
+        OR tac.is_deleted = false)
+        AND tac.date_computed IS NULL
+    GROUP BY tac.to_warehouse_id,
+        tac.rm_code_id,
+        tac.date_computed,
+        status.id,
+        status.name
+
+
+WAREHOUSE TO: INCORRECT
+
+    SELECT tf.to_warehouse_id AS warehouseid,
+        tf.rm_code_id AS rawmaterialid,
+        - sum(tf.qty_kg) AS transferred_to_qty,
+        tf.date_computed AS datecomputed,
+        status.id AS statusid,
+        status.name AS statusname
+    FROM tbl_adjustment_correct tac
+    JOIN tbl_transfer_forms tf ON tac.incorrect_transfer_id = tf.id
+    JOIN tbl_warehouses wh_to ON tf.to_warehouse_id = wh_to.id
+    JOIN tbl_status status ON tf.status_id = status.id
+
+    WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
+        AND (tac.is_deleted IS NULL
+        OR tac.is_deleted = false)
+        AND tac.date_computed IS NULL
+    GROUP BY tf.to_warehouse_id,
+        tf.rm_code_id,
+        tf.date_computed,
+        status.id,
+        status.name
+
+
+
+---------------------------[CHANGE STATUS Form Queries]---------------------------
+CORRECT:
+
+     SELECT tac.warehouse_id AS warehouseid,
+        tac.rm_code_id AS rawmaterialid,
+        current_status.name AS current_status,
+        new_status.name AS new_status,
+        SUM(tac.qty_kg) AS total_qty,
+        tac.date_computed
+
+       FROM tbl_adjustment_correct tac
+         JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+         JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
+         JOIN tbl_status current_status ON tac.current_status_id = current_status.id
+         JOIN tbl_status new_status ON tac.new_status_id = new_status.id
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
+          AND (tac.is_deleted IS NULL OR tac.is_deleted = false)
+          AND tac.date_computed IS NULL
+      GROUP BY tac.warehouse_id,
+        tac.rm_code_id,
+        tac.date_computed,
+        current_status.name,
+        new_status.name
+
+
+INCORRECT:
+
+    SELECT hf.warehouse_id AS warehouseid,
+        hf.rm_code_id AS rawmaterialid,
+        current_status.name AS current_status,
+        new_status.name AS new_status,
+        SUM(hf.qty_kg) AS total_qty,
+        hf.date_computed
+
+       FROM tbl_adjustment_correct tac
+
+         JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+         JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
+         JOIN tbl_status current_status ON hf.current_status_id = current_status.id
+         JOIN tbl_status new_status ON hf.new_status_id = new_status.id
+
+      WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
+          AND (tac.is_deleted IS NULL OR tac.is_deleted = false)
+          AND tac.date_computed IS NULL
+      GROUP BY hf.warehouse_id,
+        hf.rm_code_id,
+        hf.date_computed,
+        current_status.name,
+        new_status.name
