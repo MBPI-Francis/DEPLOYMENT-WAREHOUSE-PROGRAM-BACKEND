@@ -40,7 +40,7 @@ WITH ending_balance AS (
 		    status.name AS status,
 		    status.id AS statusid
 		FROM tbl_adjustment_correct tac
-		     JOIN tbl_adjustment_parent tap ON tac.adjustment_parent_id = tap.id
+			JOIN tbl_receiving_reports rr ON tac.incorrect_receiving_id = rr.id
 		     JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
 		     JOIN tbl_status status ON tac.status_id = status.id
 		WHERE (tac.is_cleared IS NULL OR tac.is_cleared = false)
@@ -311,7 +311,6 @@ WITH ending_balance AS (
 	
 
 
-
 -- ---------------------------[Computation Queries]---------------------------
 	computed_statement AS (
 	 SELECT eb.rawmaterialid,
@@ -479,7 +478,7 @@ WITH ending_balance AS (
 
 
 
-				--------[OUTGOING FORM CORRECT AND INCORRECT RECORDS COMPUTATION]----------
+				------[OUTGOING FORM CORRECT AND INCORRECT RECORDS COMPUTATION]----------
 				+ COALESCE(
 							CASE
 								WHEN ogr_incorrect.status::text = 'good'::text THEN ogr_incorrect.total_ogr_qty
@@ -529,6 +528,16 @@ WITH ending_balance AS (
 			ON eb.warehouseid = ogr_incorrect.warehouseid 
 				AND eb.rawmaterialid = ogr_incorrect.rawmaterialid 
 				AND eb.statusid = ogr_incorrect.statusid
+
+		LEFT JOIN adf_preparation_correct pf_correct 
+			ON eb.warehouseid = pf_correct.warehouseid 
+				AND eb.rawmaterialid = pf_correct.rawmaterialid 
+				AND eb.statusid = pf_correct.statusid
+
+		LEFT JOIN adf_preparation_incorrect pf_incorrect 
+			ON eb.warehouseid = pf_incorrect.warehouseid 
+				AND eb.rawmaterialid = pf_incorrect.rawmaterialid 
+				AND eb.statusid = pf_incorrect.statusid
 
 		
 			 
