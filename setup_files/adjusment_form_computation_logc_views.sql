@@ -539,6 +539,15 @@ WITH ending_balance AS (
 				AND eb.rawmaterialid = pf_incorrect.rawmaterialid 
 				AND eb.statusid = pf_incorrect.statusid
 
+
+		LEFT JOIN adf_preparation_incorrect pf_incorrect 
+			ON eb.warehouseid = pf_incorrect.warehouseid 
+				AND eb.rawmaterialid = pf_incorrect.rawmaterialid 
+				AND eb.statusid = pf_incorrect.statusid
+
+
+		
+
 		
 			 
 	  ORDER BY eb.rmcode, eb.warehousename, eb.warehousenumber, (COALESCE(eb.status, ''::character varying)) NULLS FIRST
