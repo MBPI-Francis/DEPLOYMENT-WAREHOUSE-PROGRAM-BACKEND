@@ -187,42 +187,40 @@ class TempReceivingReportCRUD(AppCRUD):
 
     def update_receiving_report(self, receiving_report_id: UUID, receiving_report_update: TempReceivingReportUpdate):
 
-        # Get the ID of the good status
-        status_query = text(""" SELECT id FROM tbl_status WHERE name = 'good' """)
-        status_record = self.db.execute(status_query).fetchone()  # or .fetchall() if expecting multiple rows
-        status_result = status_record
-        if status_result:
-            status_id = status_result[0]
-
-        else:
-            print("There is an error with getting the status ID")
-            return
-
-
-        # Check if the record is existing in the SOH
+        # Check if the status id is null
         query = text("""SELECT * FROM view_beginning_soh
-                        WHERE warehouseid = :warehouse_id
-                              AND rawmaterialid = :rm_code_id
-                              AND statusid = :status_id""")
-
-
+                                WHERE warehouseid = :warehouse_id
+                                      AND rawmaterialid = :rm_code_id
+                                      AND statusid = :status_id""")
 
         record = self.db.execute(query, {
             "warehouse_id": receiving_report_update.warehouse_id,
             "rm_code_id": receiving_report_update.rm_code_id,
-            "status_id": status_id
+            "status_id": receiving_report_update.status_id
         }).fetchone()  # or .fetchall() if expecting multiple rows
         result = record
 
-        # This feature is required for the calculation.
-        # Create a SOH record if there is no RM existing
+        # This feature is required for the calculation
         if not result:
+            # Get the date computed date from other existing records
+            existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+            # Extract date_computed if record exists, else use None
+            date_computed = existing_record[9] if existing_record else None
+
+            # Extract the stock_recalculation_count value
+            stock_recalculation_count = existing_record[10] if existing_record else None
+
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=receiving_report_update.rm_code_id,
                 warehouse_id=receiving_report_update.warehouse_id,
                 rm_soh=0.00,
-                status_id=status_id
+                status_id=receiving_report_update.status_id,
+                date_computed=date_computed,
+                stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
             )
             self.db.add(new_stock)
             self.db.commit()
