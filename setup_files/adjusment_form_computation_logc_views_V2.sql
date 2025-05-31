@@ -839,31 +839,34 @@ WITH ending_balance AS (
 				
 		LEFT JOIN adf_transfer_correct	tf_whfrom_correct 
 			ON eb.warehouseid = tf_whfrom_correct.wh_from_id 
-				AND eb.rawmaterialid = tf_whfrom_correct .rawmaterialid 
+				AND eb.rawmaterialid = tf_whfrom_correct.rawmaterialid 
 				AND eb.statusid = tf_whfrom_correct.statusid
 
 		LEFT JOIN adf_transfer_correct tf_whto_correct 
 			ON eb.warehouseid = tf_whto_correct.wh_to_id 
-				AND eb.rawmaterialid = tf_whto_correct .rawmaterialid 
+				AND eb.rawmaterialid = tf_whto_correct.rawmaterialid 
 				AND eb.statusid = tf_whto_correct.statusid
 
 
 	-- ----------[LEFT JOIN FOR CHANGE STATUS FORM TABLE]----------
+	-- INCORRECT Current
 		LEFT JOIN adf_change_status_incorrect cs_current_incorrect 
 			ON eb.warehouseid = cs_current_incorrect.warehouseid 
 				AND eb.rawmaterialid = cs_current_incorrect.rawmaterialid 
 				AND eb.statusid = cs_current_incorrect.current_status_id
-
+	-- CORRECT New
 		LEFT JOIN adf_change_status_incorrect cs_new_incorrect 
 			ON eb.warehouseid = cs_new_incorrect.warehouseid 
 				AND eb.rawmaterialid = cs_new_incorrect.rawmaterialid 
 				AND eb.statusid = cs_new_incorrect.new_status_id
-				
+
+	-- Current
 		LEFT JOIN adf_change_status_correct cs_current_correct 
 			ON eb.warehouseid = cs_current_correct.warehouseid 
 				AND eb.rawmaterialid = cs_current_correct.rawmaterialid 
 				AND eb.statusid = cs_current_correct.current_status_id
 
+	-- New		
 		LEFT JOIN adf_change_status_correct cs_new_correct 
 			ON eb.warehouseid = cs_new_correct.warehouseid 
 				AND eb.rawmaterialid = cs_new_correct.rawmaterialid 

@@ -13,9 +13,10 @@ from backend.api_adjustment_form.v1_form_entries.models import AdjustmentFormPar
 from backend.api_adjustment_form.v1_form_entries.schemas import AdjustmentFormCreate, AdjustmentFormUpdate
 from uuid import UUID
 from backend.api_raw_materials.v1.models import RawMaterial
+from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_transfer_form.v1.models import TempTransferForm
 from backend.api_warehouses.v1.models import Warehouse
-from sqlalchemy import or_, desc
+from sqlalchemy import or_, desc, text
 from sqlalchemy.orm import aliased
 
 
@@ -24,6 +25,14 @@ class AdjustmentFormCRUD(AppCRUD):
 
 
     def create_adjustment_form(self, adjustment_form: AdjustmentFormCreate, form: str):
+
+        # Check if the status id is null
+        query = text("""SELECT * FROM view_beginning_soh
+                                WHERE warehouseid = :warehouse_id
+                                      AND rawmaterialid = :rm_code_id
+                                      AND statusid = :status_id""")
+
+
 
         child_record = None
         # Step 1: Create parent record
@@ -39,6 +48,42 @@ class AdjustmentFormCRUD(AppCRUD):
 
         # Step 2: Create corresponding child
         if form == "receiving form":
+
+            record = self.db.execute(query, {
+                "warehouse_id": adjustment_form.warehouse_id,
+                "rm_code_id": adjustment_form.rm_code_id,
+                "status_id": adjustment_form.status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+            result = record
+
+            # This feature is required for the calculation
+            if not result:
+                # Get the date computed date from other existing records
+                existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                existing_record = self.db.execute(
+                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                # Extract date_computed if record exists, else use None
+                date_computed = existing_record[9] if existing_record else None
+
+                # Extract the stock_recalculation_count value
+                stock_recalculation_count = existing_record[10] if existing_record else None
+
+                # Create a new StockOnHand record
+                new_stock = StockOnHand(
+                    rm_code_id=adjustment_form.rm_code_id,
+                    warehouse_id=adjustment_form.warehouse_id,
+                    rm_soh=0.00,
+                    status_id=adjustment_form.status_id,
+                    date_computed=date_computed,
+                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                )
+                self.db.add(new_stock)
+                self.db.commit()
+                self.db.refresh(new_stock)
+
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -50,6 +95,41 @@ class AdjustmentFormCRUD(AppCRUD):
 
 
         elif form == "outgoing form":
+
+            record = self.db.execute(query, {
+                "warehouse_id": adjustment_form.warehouse_id,
+                "rm_code_id": adjustment_form.rm_code_id,
+                "status_id": adjustment_form.status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+            result = record
+
+            # This feature is required for the calculation
+            if not result:
+                # Get the date computed date from other existing records
+                existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                existing_record = self.db.execute(
+                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                # Extract date_computed if record exists, else use None
+                date_computed = existing_record[9] if existing_record else None
+
+                # Extract the stock_recalculation_count value
+                stock_recalculation_count = existing_record[10] if existing_record else None
+
+                # Create a new StockOnHand record
+                new_stock = StockOnHand(
+                    rm_code_id=adjustment_form.rm_code_id,
+                    warehouse_id=adjustment_form.warehouse_id,
+                    rm_soh=0.00,
+                    status_id=adjustment_form.status_id,
+                    date_computed=date_computed,
+                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                )
+                self.db.add(new_stock)
+                self.db.commit()
+                self.db.refresh(new_stock)
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -60,6 +140,40 @@ class AdjustmentFormCRUD(AppCRUD):
             )
 
         elif form == "preparation form":
+            record = self.db.execute(query, {
+                "warehouse_id": adjustment_form.warehouse_id,
+                "rm_code_id": adjustment_form.rm_code_id,
+                "status_id": adjustment_form.status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+            result = record
+
+            # This feature is required for the calculation
+            if not result:
+                # Get the date computed date from other existing records
+                existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                existing_record = self.db.execute(
+                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                # Extract date_computed if record exists, else use None
+                date_computed = existing_record[9] if existing_record else None
+
+                # Extract the stock_recalculation_count value
+                stock_recalculation_count = existing_record[10] if existing_record else None
+
+                # Create a new StockOnHand record
+                new_stock = StockOnHand(
+                    rm_code_id=adjustment_form.rm_code_id,
+                    warehouse_id=adjustment_form.warehouse_id,
+                    rm_soh=0.00,
+                    status_id=adjustment_form.status_id,
+                    date_computed=date_computed,
+                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                )
+                self.db.add(new_stock)
+                self.db.commit()
+                self.db.refresh(new_stock)
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -72,6 +186,40 @@ class AdjustmentFormCRUD(AppCRUD):
 
 
         elif form == "transfer form":
+            record = self.db.execute(query, {
+                "warehouse_id": adjustment_form.to_warehouse_id,
+                "rm_code_id": adjustment_form.rm_code_id,
+                "status_id": adjustment_form.status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+            result = record
+
+            # This feature is required for the calculation
+            if not result:
+                # Get the date computed date from other existing records
+                existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                existing_record = self.db.execute(
+                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                # Extract date_computed if record exists, else use None
+                date_computed = existing_record[9] if existing_record else None
+
+                # Extract the stock_recalculation_count value
+                stock_recalculation_count = existing_record[10] if existing_record else None
+
+                # Create a new StockOnHand record
+                new_stock = StockOnHand(
+                    rm_code_id=adjustment_form.rm_code_id,
+                    warehouse_id=adjustment_form.warehouse_id,
+                    rm_soh=0.00,
+                    status_id=adjustment_form.to_warehouse_id,
+                    date_computed=date_computed,
+                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                )
+                self.db.add(new_stock)
+                self.db.commit()
+                self.db.refresh(new_stock)
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -84,6 +232,41 @@ class AdjustmentFormCRUD(AppCRUD):
 
 
         elif form == "change status form":
+
+            record = self.db.execute(query, {
+                "warehouse_id": adjustment_form.warehouse_id,
+                "rm_code_id": adjustment_form.rm_code_id,
+                "status_id": adjustment_form.new_status_id
+            }).fetchone()  # or .fetchall() if expecting multiple rows
+            result = record
+
+            # This feature is required for the calculation
+            if not result:
+                # Get the date computed date from other existing records
+                existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                existing_record = self.db.execute(
+                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                # Extract date_computed if record exists, else use None
+                date_computed = existing_record[9] if existing_record else None
+
+                # Extract the stock_recalculation_count value
+                stock_recalculation_count = existing_record[10] if existing_record else None
+
+                # Create a new StockOnHand record
+                new_stock = StockOnHand(
+                    rm_code_id=adjustment_form.rm_code_id,
+                    warehouse_id=adjustment_form.warehouse_id,
+                    rm_soh=0.00,
+                    status_id=adjustment_form.new_status_id,
+                    date_computed=date_computed,
+                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                )
+                self.db.add(new_stock)
+                self.db.commit()
+                self.db.refresh(new_stock)
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
