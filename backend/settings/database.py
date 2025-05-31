@@ -6,7 +6,7 @@ import psycopg2
 # The DATABASE_URL variable is the connection string (also known as a database URL) used to specify how to connect to your PostgreSQL database.
 
 # Uncomment this if you want to use the RMDummyDB Database. This is the database for development
-DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMDummyDB"
+# DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMDummyDB"
 
 # Uncomment this if you want to use the RMManagementSystemDB Database. This is the database for deployment
 # DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMManagementSystemDB"
@@ -15,7 +15,7 @@ DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMDummyDB"
 # DATABASE_URL = "postgresql://postgres:331212@localhost:5432/RMManagementSystemDB"
 
 # This url is for sir Elton. You can uncomment  (With Password)
-# DATABASE_URL = "postgresql://postgres:newpassword@localhost:5432/RMManagementSystemDB"
+DATABASE_URL = "postgresql://postgres:newpassword@localhost:5431/RMManagementSystemDB"
 
 # This url is for sir Elton. You can uncomment this (Without Password)
 # DATABASE_URL = "postgresql://postgres@localhost:5432/RMManagementSystemDB"
@@ -42,12 +42,5 @@ def get_db():
     finally:
         db.close()
 
-
-# Uncomment this if you are running the API locally (your own computer)
-server_ip = "http://127.0.0.1:8000"
-
-
-# Uncomment this if you are deploying the API using company's Server
-# server_ip = "http://192.168.1.13:8000"
 
 

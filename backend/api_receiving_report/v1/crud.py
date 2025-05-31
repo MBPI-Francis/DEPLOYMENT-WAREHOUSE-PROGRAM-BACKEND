@@ -5,6 +5,7 @@ from backend.api_receiving_report.v1.main import AppCRUD, AppService
 from backend.api_receiving_report.v1.models import TempReceivingReport
 from backend.api_receiving_report.v1.schemas import TempReceivingReportCreate, TempReceivingReportUpdate
 from backend.api_raw_materials.v1.models import RawMaterial
+from backend.api_status.v1.models import Status
 from backend.api_warehouses.v1.models import Warehouse
 from uuid import UUID
 from backend.api_stock_on_hand.v1.models import StockOnHand
@@ -16,17 +17,6 @@ from sqlalchemy import text
 
 class TempReceivingReportCRUD(AppCRUD):
     def create_receiving_report(self, receiving_report: TempReceivingReportCreate):
-        status_query = text(""" SELECT id FROM tbl_status WHERE name = 'good' """)
-
-        status_record = self.db.execute(status_query).fetchone()  # or .fetchall() if expecting multiple rows
-        status_result = status_record
-
-        if status_result:
-            status_id = status_result[0]
-
-        else:
-            print("There is an error with getting the status ID")
-            return
 
         # Check if the status id is null
         query = text("""SELECT * FROM view_beginning_soh
@@ -39,18 +29,32 @@ class TempReceivingReportCRUD(AppCRUD):
         record = self.db.execute(query, {
             "warehouse_id": receiving_report.warehouse_id,
             "rm_code_id": receiving_report.rm_code_id,
-            "status_id": status_id
+            "status_id": receiving_report.status_id
         }).fetchone()  # or .fetchall() if expecting multiple rows
         result = record
 
         # This feature is required for the calculation
         if not result:
+
+            # Get the date computed date from other existing records
+            existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+            # Extract date_computed if record exists, else use None
+            date_computed = existing_record[9] if existing_record else None
+
+            # Extract the stock_recalculation_count value
+            stock_recalculation_count = existing_record[10] if existing_record else None
+
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=receiving_report.rm_code_id,
                 warehouse_id=receiving_report.warehouse_id,
                 rm_soh=0.00,
-                status_id=status_id
+                status_id=receiving_report.status_id,
+                date_computed=date_computed,
+ 		stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
             )
             self.db.add(new_stock)
             self.db.commit()
@@ -61,7 +65,8 @@ class TempReceivingReportCRUD(AppCRUD):
                                                    warehouse_id=receiving_report.warehouse_id,
                                                    ref_number=receiving_report.ref_number,
                                                    receiving_date=receiving_report.receiving_date,
-                                                   qty_kg=receiving_report.qty_kg
+                                                   qty_kg=receiving_report.qty_kg,
+                                                    status_id=receiving_report.status_id
                                                    )
 
 
@@ -82,6 +87,7 @@ class TempReceivingReportCRUD(AppCRUD):
                 TempReceivingReport.qty_kg,
                 TempReceivingReport.ref_number,
                 Warehouse.wh_name,
+                Status.name.label("status"),
                 TempReceivingReport.receiving_date,
                 TempReceivingReport.created_at,
                 TempReceivingReport.updated_at
@@ -89,6 +95,7 @@ class TempReceivingReportCRUD(AppCRUD):
             )
             .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial
             .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id) # Join Receiving Report with Warehouse
+            .join(Status, TempReceivingReport.status_id == Status.id)
             .filter(
                 # Filter for records where is_cleared or is_deleted is NULL or False
                 or_(
@@ -100,6 +107,8 @@ class TempReceivingReportCRUD(AppCRUD):
                     TempReceivingReport.is_deleted == False  # False check for is_deleted
                 )
             )
+
+            .order_by(desc(TempReceivingReport.created_at))  # Order from newest to oldest
         )
 
         # Return All the result
@@ -120,6 +129,7 @@ class TempReceivingReportCRUD(AppCRUD):
                 TempReceivingReport.qty_kg,
                 TempReceivingReport.ref_number,
                 Warehouse.wh_name,
+                Status.name.label("status"),
                 TempReceivingReport.receiving_date,
                 TempReceivingReport.created_at,
                 TempReceivingReport.updated_at
@@ -127,6 +137,7 @@ class TempReceivingReportCRUD(AppCRUD):
             )
             .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial
             .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id) # Join Receiving Report with Warehouse
+            .join(Status, TempReceivingReport.status_id == Status.id)
             .filter(
                     TempReceivingReport.is_deleted == True  # False check for is_deleted
             )
@@ -149,6 +160,7 @@ class TempReceivingReportCRUD(AppCRUD):
                 TempReceivingReport.qty_kg,
                 TempReceivingReport.ref_number,
                 Warehouse.wh_name,
+                Status.name.label("status"),
                 TempReceivingReport.receiving_date,
                 TempReceivingReport.created_at,
                 TempReceivingReport.updated_at,
@@ -157,6 +169,7 @@ class TempReceivingReportCRUD(AppCRUD):
             )
             .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial
             .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id) # Join Receiving Report with Warehouse
+            .join(Status, TempReceivingReport.status_id == Status.id)
             .filter(
                 # Filter for records where is_cleared or is_deleted is NULL or False
                 #     TempReceivingReport.is_cleared == True,  # False check for is_cleared

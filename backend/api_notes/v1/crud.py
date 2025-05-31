@@ -4,7 +4,7 @@ from backend.api_notes.v1.main import AppCRUD
 from backend.api_notes.v1.models import TempNotes
 from backend.api_notes.v1.schemas import NotesCreate, NotesUpdate
 from uuid import UUID
-from sqlalchemy import or_
+from sqlalchemy import or_, desc
 
 # These are the code for the app to communicate to the database
 # This is where the program communicate in the database
@@ -23,7 +23,9 @@ class TempNotesCRUD(AppCRUD):
 
     def get_notes(self):
         # Query TempNotes with filters applied to is_cleared and is_deleted columns
-        notes_item = self.db.query(TempNotes).filter(
+        notes_item = (
+            self.db.query(TempNotes)
+            .filter(
             or_(
                 TempNotes.is_cleared.is_(None),  # NULL check for is_cleared
                 TempNotes.is_cleared == False # False check for is_cleared
@@ -33,8 +35,9 @@ class TempNotesCRUD(AppCRUD):
                 TempNotes.is_deleted.is_(None),  # NULL check for is_deleted
                 TempNotes.is_deleted == False  # False check for is_deleted
             )
-
-        ).all()
+        )
+        .order_by(desc(TempNotes.created_at))  # Order from newest to oldest
+        .all())
 
         # Return the filtered records, or an empty list if no records are found
         if notes_item:

@@ -14,6 +14,7 @@ class TempOutgoingReport(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     rm_code_id = Column(UUID(as_uuid=True), ForeignKey("tbl_raw_materials.id"), nullable=False)
     warehouse_id = Column(UUID(as_uuid=True), ForeignKey("tbl_warehouses.id"), nullable=False)
+    status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=False)
 
     ref_number = Column(String(50), nullable=False, unique=False)
     outgoing_date = Column(Date,nullable=False)
@@ -36,6 +37,7 @@ class TempOutgoingReport(Base):
     deleted_by = relationship("User", foreign_keys=[deleted_by_id], backref="deleted_outgoing_reports")
     rm_code = relationship("RawMaterial", foreign_keys=[rm_code_id], backref="rm_outgoing_reports")
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id], backref="warehouse_outgoing_reports")
+    status = relationship("Status", foreign_keys=[status_id], backref="status_outgoing_reports")
 
 
 

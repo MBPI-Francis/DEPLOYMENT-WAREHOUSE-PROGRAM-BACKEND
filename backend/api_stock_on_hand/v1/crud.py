@@ -13,6 +13,7 @@ from uuid import UUID
 from backend.api_warehouses.v1.models import Warehouse
 from sqlalchemy import or_
 from datetime import date
+from sqlalchemy import text
 
 # These are the code for the app to communicate to the database
 class StockOnHandCRUD(AppCRUD):
@@ -79,18 +80,17 @@ class StockOnHandCRUD(AppCRUD):
         else:
             return []
 
-    def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id):
+    def import_rm_soh(self, rm_code_id, total, status_id, warehouse_id, date_computed, count):
         # Insert data into the StockOnHand table
-
-        current_date = date.today()  # Get current date and time
 
         new_stock_on_hand = StockOnHand(
             rm_code_id=rm_code_id,
             rm_soh=total,
             status_id=status_id,
             warehouse_id=warehouse_id,
-            date_computed=current_date,
-            is_imported = True
+            date_computed=date_computed,
+            is_imported=True,
+            stock_recalculation_count=count
         )
         self.db.add(new_stock_on_hand)
         self.db.commit()

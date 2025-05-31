@@ -9,6 +9,7 @@ from datetime import date, datetime
 class TempReceivingReport(BaseModel):
     rm_code_id: UUID
     warehouse_id: UUID
+    status_id: UUID
     ref_number: str = Field(max_length=50, description="The reference number of the Receiving Report")
     receiving_date: date
     qty_kg: float
@@ -26,6 +27,7 @@ class TempReceivingReportResponse(BaseModel):
     qty_kg: float
     ref_number: str
     wh_name: str
+    status: str
     receiving_date: date
     created_at: datetime
     updated_at: datetime

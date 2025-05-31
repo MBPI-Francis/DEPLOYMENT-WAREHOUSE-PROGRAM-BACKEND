@@ -11,7 +11,7 @@ from backend.api_warehouses.v1.models import Warehouse
 from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_status.v1.models import Status
 from uuid import UUID
-from sqlalchemy import text
+from sqlalchemy import text, desc
 from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 
@@ -34,14 +34,29 @@ class TempTransferFormCRUD(AppCRUD):
         }).fetchone()  # or .fetchall() if expecting multiple rows
         result = record
 
+
         # This feature is required for the calculation
         if not result:
+
+            # Get the date computed date from other existing records
+            existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+            # Extract date_computed if record exists, else use None
+            date_computed = existing_record[9] if existing_record else None
+		
+            # Extract the stock_recalculation_count value
+            stock_recalculation_count = existing_record[10] if existing_record else None
+
             # Create a new StockOnHand record
             new_stock = StockOnHand(
                 rm_code_id=transfer_form.rm_code_id,
                 warehouse_id=transfer_form.to_warehouse_id,
                 rm_soh=0.00,
-                status_id=transfer_form.status_id
+                status_id=transfer_form.status_id,
+                date_computed=date_computed,  # Insert retrieved date_computed
+ 		stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
             )
             self.db.add(new_stock)
             self.db.commit()
@@ -105,6 +120,8 @@ class TempTransferFormCRUD(AppCRUD):
                     TempTransferForm.is_deleted == False  # False check for is_deleted
                 )
             )
+
+            .order_by(desc(TempTransferForm.created_at))  # Order from newest to oldest
         )
 
         # Return filtered results

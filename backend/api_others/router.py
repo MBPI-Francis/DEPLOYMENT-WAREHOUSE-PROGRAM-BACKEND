@@ -8,11 +8,13 @@ from uuid import UUID
 from backend.api_preparation_form.v1.models import TempPreparationForm
 from backend.api_notes.v1.models import TempNotes
 from backend.api_transfer_form.v1.models import TempTransferForm
+from backend.api_adjustment_form.v1_spillage.models import SpillageAdjustmentForm
 from backend.api_outgoing_report.v1.models import TempOutgoingReport
 from backend.api_receiving_report.v1.models import TempReceivingReport
 from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_change_status_form.v1.models import TempHeldForm
 from typing import Optional
+from datetime import datetime, timedelta
 
 
 
@@ -22,7 +24,7 @@ router = APIRouter(prefix="/api")
 @router.get("/get/new_soh/")
 async def get_new_soh(db: get_db = Depends()):
     try:
-        query = text("SELECT * FROM view_ending_stocks_balance WHERE new_beginning_balance != 0.00")
+        query = text("SELECT * FROM view_adjusted_ending_balance WHERE new_beginning_balance != 0.00")
         result = db.execute(query)
         rows = result.fetchall()
         # Convert rows to a list of dictionaries
@@ -39,7 +41,7 @@ async def get_new_soh(db: get_db = Depends()):
 @router.get("/get/new_soh/with_zero/")
 async def get_new_soh(db: get_db = Depends()):
     try:
-        query = text("SELECT * FROM view_ending_stocks_balance")
+        query = text("SELECT * FROM view_adjusted_ending_balance")
         result = db.execute(query)
         rows = result.fetchall()
         # Convert rows to a list of dictionaries
@@ -80,15 +82,28 @@ async def get_record(
         db: get_db = Depends()):
     try:
 
+        # # Check if the status id is null
+        # if status_id:
+        #     query = text(f"""SELECT * FROM view_ending_stocks_balance
+        #                                WHERE warehouseid = '{warehouse_id}'
+        #                                        AND statusid = '{status_id}'
+        #                                        AND rawmaterialid = '{rm_id}'""")
+        #
+        # else:
+        #     query = text(f"""SELECT * FROM view_ending_stocks_balance
+        #                     WHERE warehouseid = '{warehouse_id}'
+        #                             AND rawmaterialid = '{rm_id}'""")
+
+
         # Check if the status id is null
         if status_id:
-            query = text(f"""SELECT * FROM view_ending_stocks_balance
+            query = text(f"""SELECT * FROM view_adjusted_ending_balance
                                        WHERE warehouseid = '{warehouse_id}'
                                                AND statusid = '{status_id}'
                                                AND rawmaterialid = '{rm_id}'""")
 
         else:
-            query = text(f"""SELECT * FROM view_ending_stocks_balance
+            query = text(f"""SELECT * FROM view_adjusted_ending_balance
                             WHERE warehouseid = '{warehouse_id}'
                                     AND rawmaterialid = '{rm_id}'""")
         result = db.execute(query)
@@ -143,6 +158,7 @@ async def update_date_computed(db: get_db = Depends()):
         TempOutgoingReport,
         TempReceivingReport,
         TempHeldForm,
+        SpillageAdjustmentForm,
     ]
 
     updated_tables = []
@@ -167,12 +183,30 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
         A JSON response indicating the success of the operation.
     """
 
-    current_date = date.today()
-    query = text("SELECT * FROM view_ending_stocks_balance")
+    params_date = datetime.strptime(params_date, "%Y-%m-%d").strftime("%m/%d/%Y")
+    # query = text("SELECT * FROM view_ending_stocks_balance")
+    query = text("SELECT * FROM view_adjusted_ending_balance")
+
+    def get_latest_count():
+        # Get the largest stock recalculation count
+        existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
+                                FROM tbl_stock_on_hand;
+                                """)
+
+        largest_count = db.execute(
+            existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+        if largest_count[0]:
+            new_stock_recalculation_count = largest_count[0] + 1
+        else:
+            new_stock_recalculation_count = 1
+
+        return new_stock_recalculation_count
+
 
     try:
         # Execute the query and fetch all rows
         result = db.execute(query).fetchall()
+        latest_count = get_latest_count()
 
         # Convert the result into a list of dictionaries
         records = [
@@ -191,7 +225,8 @@ async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
                                       warehouse_id=record["warehouseid"],
                                       rm_soh=record["new_beginning_balance"],
                                       status_id= record["statusid"],
-                                      date_computed=current_date)
+                                      date_computed=params_date,
+                                      stock_recalculation_count=latest_count)
             db.add(rm_soh_item)
             db.commit()
             db.refresh(rm_soh_item)
@@ -270,6 +305,11 @@ async def clear_table_data(tbl: str, db: get_db = Depends()):
             TempHeldForm,
         ]
 
+    elif tbl == 'adjustment forms':
+        tables = [
+            SpillageAdjustmentForm,
+        ]
+
     elif tbl == 'all':
         tables = [
             TempNotes,
@@ -278,6 +318,7 @@ async def clear_table_data(tbl: str, db: get_db = Depends()):
             TempOutgoingReport,
             TempReceivingReport,
             TempHeldForm,
+            SpillageAdjustmentForm,
         ]
 
     updated_tables = []
@@ -294,34 +335,83 @@ async def clear_table_data(tbl: str, db: get_db = Depends()):
 async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, status_id: Optional[UUID]=None, db: get_db = Depends()):
     try:
 
-        # Check if the status id is null
-        if status_id:
-            query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-                                       WHERE warehouseid = '{warehouse_id}'
-                                               AND statusid = '{status_id}'
-                                               AND rawmaterialid = '{rm_id}'
-                                                """)
 
-        else:
-            query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-                            WHERE warehouseid = '{warehouse_id}'
-                                    AND rawmaterialid = '{rm_id}'
-                                    AND statusid IS NULL""")
-        result = db.execute(query)
+        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'
+                                            """)
+
+        result = db.execute(new_beginning_query)
         beginning_balance = result.fetchone()
         # Check if there is a record after executing the query
 
 
         if beginning_balance:
+
             # Check if the entered_qty is less or equal than the beginning balance
             #  Returns true if the entered quantity is less or equal
             # Returns false if the entered quantity exceeds
 
-            if float(entered_qty) <= float(beginning_balance[0]):
+            if float(beginning_balance[0]) >= entered_qty:
                 return True
 
             else:
                 return False
+
+        else:
+            return False
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/check/rm-stock-value/adjustment_form/")
+async def check_stock_value(rm_id: UUID,
+                            warehouse_id: UUID,
+                            entered_qty: float,
+                            status_id: Optional[UUID]=None,
+                            db: get_db = Depends()):
+    try:
+
+
+        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'
+                                            """)
+
+        result = db.execute(new_beginning_query)
+        beginning_balance = result.fetchone()
+        # Check if there is a record after executing the query
+
+
+        if beginning_balance:
+
+            # Check if the entered_qty is less or equal than the beginning balance
+            #  Returns true if the entered quantity is less or equal
+            # Returns false if the entered quantity exceeds
+
+            ending_result =  float(beginning_balance[0]) - entered_qty
+            print(float(ending_result))
+            if ending_result < 0:
+                return False
+
+            else:
+                return True
+
 
         else:
             return False
@@ -331,32 +421,132 @@ async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, statu
 
 
 @router.get("/check/rm-stock-value/for-update/")
-async def check_stock_for_update(rm_id: UUID, warehouse_id: UUID, entered_qty: float, status_id: Optional[UUID]=None, db: get_db = Depends()):
+async def check_stock_for_update(rm_id: UUID,
+                                 warehouse_id: UUID,
+                                 prev_entered_qty: float,
+                                 new_entered_qty: float,
+                                 status_id: Optional[UUID]=None,
+                                 db: get_db = Depends()
+                                 ):
     try:
         # Check if the status id is null
-        if status_id:
-            query = text(f"""SELECT beginningbalance FROM public.view_beginning_soh
-                                       WHERE warehouseid = '{warehouse_id}'
-                                               AND statusid = '{status_id}'
-                                               AND rawmaterialid = '{rm_id}'
-                                                """)
+        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'    
+                                            """)
+
+        ending_balance_result = db.execute(ending_balance_query)
+        ending_balance = ending_balance_result.fetchone()
+
+        sum_of_beginning_and_entered_qty = float(ending_balance[0]) + float(prev_entered_qty)
+
+        difference = sum_of_beginning_and_entered_qty - float(new_entered_qty)
+
+        if difference >= 0:
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/check/rm-stock-value/for-update/adjustment_form/")
+async def check_stock_for_update(rm_id: UUID,
+                                 warehouse_id: UUID,
+                                 prev_entered_qty: float,
+                                 new_entered_qty: float,
+                                 status_id: Optional[UUID]=None,
+                                 db: get_db = Depends()
+                                 ):
+    try:
+        # Check if the status id is null
+        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'    
+                                            """)
+
+        ending_balance_result = db.execute(ending_balance_query)
+        ending_balance = ending_balance_result.fetchone()
+
+
+        if float(prev_entered_qty) < 0:
+            conv_positive_value = abs(float(prev_entered_qty))
+            result_of_beginning_and_entered_qty = float(conv_positive_value) + float(ending_balance[0])
+
 
         else:
-            query = text(f"""SELECT beginningbalance FROM public.view_beginning_soh
-                            WHERE warehouseid = '{warehouse_id}'
-                                    AND rawmaterialid = '{rm_id}'
-                                    AND statusid IS NULL""")
-        result = db.execute(query)
+            result_of_beginning_and_entered_qty = float(ending_balance[0]) - float(prev_entered_qty)
+
+        ending_result = new_entered_qty + result_of_beginning_and_entered_qty
+        if ending_result < 0:
+            return False
+
+        else:
+            return True
+
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.get("/check/preparation-form/validation")
+async def check_stock(rm_id: UUID,
+                      warehouse_id: UUID,
+                      qty_prep: float,
+                      qty_returned: float,
+                      status_id: Optional[UUID]=None,
+                      db: get_db = Depends()):
+    try:
+
+
+        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'
+                                            """)
+
+        result = db.execute(new_beginning_query)
         beginning_balance = result.fetchone()
+
+    
         # Check if there is a record after executing the query
 
 
         if beginning_balance:
-            # Check if the entered_qty is less or equal than the beginning balance
-            #  Returns true if the entered quantity is less or equal
-            # Returns false if the entered quantity exceeds
 
-            if float(entered_qty) <= float(beginning_balance[0]):
+            # Check if the entered_qty is less or equal than the beginning balance
+            #  Returns true if the consumption is less or equal
+            # Returns false if the consumption exceeds
+
+            consumption = qty_prep - qty_returned
+
+            if float(beginning_balance[0]) >= round(consumption, 2):
+    
                 return True
 
             else:
@@ -366,3 +556,46 @@ async def check_stock_for_update(rm_id: UUID, warehouse_id: UUID, entered_qty: f
             return False
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/check/preparation-form/validation/for-update/")
+async def check_stock_for_update(rm_id: UUID,
+                                 warehouse_id: UUID,
+                                 prev_consumption: float,
+                                 new_consumption: float,
+                                 status_id: Optional[UUID]=None,
+                                 db: get_db = Depends()
+                                 ):
+    try:
+        # Check if the status id is null
+        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
+        #                            WHERE warehouseid = '{warehouse_id}'
+        #                                    AND statusid = '{status_id}'
+        #                                    AND rawmaterialid = '{rm_id}'
+        #                                     """)
+
+
+        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                   WHERE warehouseid = '{warehouse_id}'
+                                           AND statusid = '{status_id}'
+                                           AND rawmaterialid = '{rm_id}'    
+                                            """)
+
+        ending_balance_result = db.execute(ending_balance_query)
+        ending_balance = ending_balance_result.fetchone()
+
+        sum_of_beginning_and_prev_consumption = float(ending_balance[0]) + float(prev_consumption)
+
+    
+
+        difference = sum_of_beginning_and_prev_consumption - round(new_consumption, 2)
+
+        if difference >= 0:
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

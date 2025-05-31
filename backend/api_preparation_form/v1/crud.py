@@ -11,6 +11,7 @@ from backend.api_warehouses.v1.models import Warehouse
 from backend.api_status.v1.models import Status
 from sqlalchemy import or_
 from uuid import UUID
+from sqlalchemy import desc  # Import for descending order
 
 
 # These are the code for the app to communicate to the database
@@ -68,6 +69,7 @@ class TempPreparationFormCRUD(AppCRUD):
                     TempPreparationForm.is_deleted == False  # False check for is_deleted
                 )
             )
+            .order_by(desc(TempPreparationForm.created_at))  # Order from newest to oldest
         )
 
         # Return All the result
