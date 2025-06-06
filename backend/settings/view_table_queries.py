@@ -875,14 +875,14 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         - COALESCE(
                                     CASE
-                                        WHEN cs_current_incorrect.current_status::text = 'held : reject'::text THEN cs_current_incorrect.total_qty
+                                        WHEN cs_current_correct.current_status::text = 'held : reject'::text THEN cs_current_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
         
                         + COALESCE(
                                     CASE
-                                        WHEN cs_new_incorrect.new_status::text = 'held : reject'::text THEN cs_new_incorrect.total_qty
+                                        WHEN cs_new_correct.new_status::text = 'held : reject'::text THEN cs_new_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
@@ -996,7 +996,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         - COALESCE(
                                     CASE
-                                        WHEN cs_current_incorrect.current_status::text = 'held : contaminated'::text THEN cs_current_incorrect.total_qty
+                                        WHEN cs_current_correct.current_status::text = 'held : contaminated'::text THEN cs_current_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
@@ -1004,7 +1004,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         + COALESCE(
                                     CASE
-                                        WHEN cs_new_incorrect.new_status::text = 'held : contaminated'::text THEN cs_new_incorrect.total_qty
+                                        WHEN cs_new_correct.new_status::text = 'held : contaminated'::text THEN cs_new_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
@@ -1118,7 +1118,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         - COALESCE(
                                     CASE
-                                        WHEN cs_current_incorrect.current_status::text = 'held : under evaluation'::text THEN cs_current_incorrect.total_qty
+                                        WHEN cs_current_correct.current_status::text = 'held : under evaluation'::text THEN cs_current_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
@@ -1126,7 +1126,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         + COALESCE(
                                     CASE
-                                        WHEN cs_new_incorrect.new_status::text = 'held : under evaluation'::text THEN cs_new_incorrect.total_qty
+                                        WHEN cs_new_correct.new_status::text = 'held : under evaluation'::text THEN cs_new_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
@@ -1240,7 +1240,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         - COALESCE(
                                     CASE
-                                        WHEN cs_current_incorrect.current_status::text = 'good'::text THEN cs_current_incorrect.total_qty
+                                        WHEN cs_current_correct.current_status::text = 'good'::text THEN cs_current_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
@@ -1248,7 +1248,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         + COALESCE(
                                     CASE
-                                        WHEN cs_new_incorrect.new_status::text = 'good'::text THEN cs_new_incorrect.total_qty
+                                        WHEN cs_new_correct.new_status::text = 'good'::text THEN cs_new_correct.total_qty
                                         ELSE NULL::numeric
                                     END, 0::numeric
                         )
