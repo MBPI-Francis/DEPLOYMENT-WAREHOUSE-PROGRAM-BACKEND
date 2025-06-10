@@ -164,7 +164,8 @@ class TempReceivingReportCRUD(AppCRUD):
                 TempReceivingReport.receiving_date,
                 TempReceivingReport.created_at,
                 TempReceivingReport.updated_at,
-                TempReceivingReport.date_computed
+                TempReceivingReport.date_computed,
+                TempReceivingReport.is_adjusted
 
             )
             .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial

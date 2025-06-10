@@ -32,8 +32,6 @@ class AdjustmentFormCRUD(AppCRUD):
                                       AND rawmaterialid = :rm_code_id
                                       AND statusid = :status_id""")
 
-
-
         child_record = None
         # Step 1: Create parent record
         parent_record = AdjustmentFormParent(
@@ -83,6 +81,18 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.commit()
                 self.db.refresh(new_stock)
 
+            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
+            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
+                AdjustmentFormCorrect.incorrect_receiving_id == adjustment_form.incorrect_receiving_id,
+                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
+            ).first()
+
+            if existing_correct_record:
+                # Update existing record and mark it as deleted
+                existing_correct_record.is_deleted = True
+                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
+                self.db.flush()  # Apply the update in the current transaction
+
 
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
@@ -93,6 +103,14 @@ class AdjustmentFormCRUD(AppCRUD):
                 incorrect_receiving_id=adjustment_form.incorrect_receiving_id
             )
 
+            main_record = self.db.query(TempReceivingReport).filter(
+                TempReceivingReport.id == adjustment_form.incorrect_receiving_id
+            ).first()
+
+            if main_record:
+                if not main_record.is_adjusted:
+                    main_record.is_adjusted = True
+                    self.db.flush()  # Apply the change
 
         elif form == "outgoing form":
 
@@ -130,6 +148,18 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.commit()
                 self.db.refresh(new_stock)
 
+            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
+            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
+                AdjustmentFormCorrect.incorrect_outgoing_id == adjustment_form.incorrect_outgoing_id,
+                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
+            ).first()
+
+            if existing_correct_record:
+                # Update existing record and mark it as deleted
+                existing_correct_record.is_deleted = True
+                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
+                self.db.flush()  # Apply the update in the current transaction
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -138,6 +168,15 @@ class AdjustmentFormCRUD(AppCRUD):
                 qty_kg=adjustment_form.qty_kg,
                 incorrect_outgoing_id=adjustment_form.incorrect_outgoing_id
             )
+
+            main_record = self.db.query(TempOutgoingReport).filter(
+                TempOutgoingReport.id == adjustment_form.incorrect_outgoing_id
+            ).first()
+
+            if main_record:
+                if not main_record.is_adjusted:
+                    main_record.is_adjusted = True
+                    self.db.flush()  # Apply the change
 
         elif form == "preparation form":
             record = self.db.execute(query, {
@@ -174,6 +213,19 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.commit()
                 self.db.refresh(new_stock)
 
+
+            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
+            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
+                AdjustmentFormCorrect.incorrect_preparation_id == adjustment_form.incorrect_preparation_id,
+                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
+            ).first()
+
+            if existing_correct_record:
+                # Update existing record and mark it as deleted
+                existing_correct_record.is_deleted = True
+                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
+                self.db.flush()  # Apply the update in the current transaction
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -183,6 +235,15 @@ class AdjustmentFormCRUD(AppCRUD):
                 qty_return=adjustment_form.qty_return,
                 incorrect_preparation_id=adjustment_form.incorrect_preparation_id
             )
+
+            main_record = self.db.query(TempPreparationForm).filter(
+                TempPreparationForm.id == adjustment_form.incorrect_preparation_id
+            ).first()
+
+            if main_record:
+                if not main_record.is_adjusted:
+                    main_record.is_adjusted = True
+                    self.db.flush()  # Apply the change
 
 
         elif form == "transfer form":
@@ -220,6 +281,18 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.commit()
                 self.db.refresh(new_stock)
 
+            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
+            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
+                AdjustmentFormCorrect.incorrect_transfer_id == adjustment_form.incorrect_transfer_id,
+                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
+            ).first()
+
+            if existing_correct_record:
+                # Update existing record and mark it as deleted
+                existing_correct_record.is_deleted = True
+                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
+                self.db.flush()  # Apply the update in the current transaction
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -229,6 +302,15 @@ class AdjustmentFormCRUD(AppCRUD):
                 qty_kg=adjustment_form.qty_kg,
                 incorrect_transfer_id=adjustment_form.incorrect_transfer_id
             )
+
+            main_record = self.db.query(TempTransferForm).filter(
+                TempTransferForm.id == adjustment_form.incorrect_transfer_id
+            ).first()
+
+            if main_record:
+                if not main_record.is_adjusted:
+                    main_record.is_adjusted = True
+                    self.db.flush()  # Apply the change
 
 
         elif form == "change status form":
@@ -267,6 +349,19 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.commit()
                 self.db.refresh(new_stock)
 
+
+            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
+            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
+                AdjustmentFormCorrect.incorrect_change_status_id == adjustment_form.incorrect_change_status_id,
+                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
+            ).first()
+
+            if existing_correct_record:
+                # Update existing record and mark it as deleted
+                existing_correct_record.is_deleted = True
+                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
+                self.db.flush()  # Apply the update in the current transaction
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -276,6 +371,15 @@ class AdjustmentFormCRUD(AppCRUD):
                 qty_kg=adjustment_form.qty_kg,
                 incorrect_change_status_id=adjustment_form.incorrect_change_status_id
             )
+
+            main_record = self.db.query(TempHeldForm).filter(
+                TempHeldForm.id == adjustment_form.incorrect_change_status_id
+            ).first()
+
+            if main_record:
+                if not main_record.is_adjusted:
+                    main_record.is_adjusted = True
+                    self.db.flush()  # Apply the change
 
 
         self.db.add(child_record)

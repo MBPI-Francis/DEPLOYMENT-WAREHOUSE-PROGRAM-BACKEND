@@ -123,7 +123,8 @@ class TempOutgoingReportCRUD(AppCRUD):
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
                 TempOutgoingReport.updated_at,
-                TempOutgoingReport.date_computed
+                TempOutgoingReport.date_computed,
+                TempOutgoingReport.is_adjusted
 
             )
 

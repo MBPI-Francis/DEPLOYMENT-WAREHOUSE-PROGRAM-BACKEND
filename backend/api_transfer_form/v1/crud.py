@@ -188,7 +188,8 @@ class TempTransferFormCRUD(AppCRUD):
                 Status.name.label("status"),
                 TempTransferForm.created_at,
                 TempTransferForm.updated_at,
-                TempTransferForm.date_computed
+                TempTransferForm.date_computed,
+                TempTransferForm.is_adjusted
             )
 
             .outerjoin(Status, Status.id == TempTransferForm.status_id)  # Left join Status with TransferForm

@@ -219,7 +219,8 @@ class TempHeldFormCRUD(AppCRUD):
                 TempHeldForm.change_status_date,
                 TempHeldForm.created_at,
                 TempHeldForm.updated_at,
-                TempHeldForm.date_computed
+                TempHeldForm.date_computed,
+                TempHeldForm.is_adjusted
 
             )
             .join(RawMaterial, TempHeldForm.rm_code_id == RawMaterial.id)  # Join TempHeldForm with RawMaterial

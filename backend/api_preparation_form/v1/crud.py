@@ -126,7 +126,9 @@ class TempPreparationFormCRUD(AppCRUD):
                 TempPreparationForm.preparation_date,
                 TempPreparationForm.created_at,
                 TempPreparationForm.updated_at,
-                TempPreparationForm.date_computed
+                TempPreparationForm.date_computed,
+                TempPreparationForm.is_adjusted
+
 
             )
 
