@@ -37,6 +37,7 @@ class TempHeldFormResponse(BaseModel):
     created_by_id: Optional[UUID] = None
     updated_by_id: Optional[UUID] = None
     date_computed: Optional[date] = None
+    is_adjusted: Optional[bool] = None
 
     class Config:
         from_attributes = True

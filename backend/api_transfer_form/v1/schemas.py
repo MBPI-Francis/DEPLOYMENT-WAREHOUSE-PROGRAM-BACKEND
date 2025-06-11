@@ -36,6 +36,7 @@ class TempTransferFormResponse(BaseModel):
     created_by: Optional[UUID] = None
     updated_by: Optional[UUID] = None
     date_computed: Optional[date] = None
+    is_adjusted: Optional[bool] = None
 
     class Config:
         from_attributes = True
