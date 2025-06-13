@@ -415,6 +415,7 @@ class AdjustmentFormCRUD(AppCRUD):
                 RawMaterial.rm_code.label("raw_material"),
                 AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormParent.ref_number,
+                AdjustmentFormParent.adjustment_type,
                 AdjustmentFormParent.responsible_person,
 
                 Warehouse.wh_name,
@@ -471,7 +472,6 @@ class AdjustmentFormCRUD(AppCRUD):
             )
             .order_by(desc(AdjustmentFormCorrect.created_at))
         )
-
         return stmt.all()
 
     def get_deleted_adjustment_form(self):
@@ -501,6 +501,7 @@ class AdjustmentFormCRUD(AppCRUD):
                 RawMaterial.rm_code.label("raw_material"),
                 AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormParent.ref_number,
+                AdjustmentFormParent.adjustment_type,
                 AdjustmentFormParent.responsible_person,
 
                 Warehouse.wh_name,
@@ -578,6 +579,7 @@ class AdjustmentFormCRUD(AppCRUD):
                 RawMaterial.rm_code.label("raw_material"),
                 AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormParent.ref_number,
+                AdjustmentFormParent.adjustment_type,
                 AdjustmentFormParent.responsible_person,
 
                 Warehouse.wh_name,

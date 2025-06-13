@@ -34,9 +34,9 @@ class TempOutgoingReportService(AppService):
             raise TempOutgoingReportNotFoundException(detail=f"Error: {str(e)}")
         return outgoing_report_item
 
-    def get_historical_outgoing_report(self):
+    def get_historical_outgoing_report(self, outgoing_report_id):
         try:
-            outgoing_report_item = TempOutgoingReportCRUD(self.db).get_historical_outgoing_report()
+            outgoing_report_item = TempOutgoingReportCRUD(self.db).get_historical_outgoing_report(outgoing_report_id)
 
         except Exception as e:
             raise TempOutgoingReportNotFoundException(detail=f"Error: {str(e)}")

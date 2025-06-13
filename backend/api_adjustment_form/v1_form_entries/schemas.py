@@ -62,6 +62,7 @@ class AdjustmentFormResponse(BaseModel):
     incorrect_change_status_id: Optional[UUID] = None
 
     ref_number: str
+    adjustment_type: str
     responsible_person: Optional[str] = None
     raw_material: str
     qty_kg: Optional[float] = None

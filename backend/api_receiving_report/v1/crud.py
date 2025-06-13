@@ -75,7 +75,7 @@ class TempReceivingReportCRUD(AppCRUD):
         self.db.refresh(receiving_report_item)
         return receiving_report_item
 
-    def get_receiving_report(self):
+    def get_receiving_report(self, record_id):
         """
         Join StockOnHand, ReceivingReport, Warehouse, and RawMaterial tables.
         """
@@ -111,9 +111,14 @@ class TempReceivingReportCRUD(AppCRUD):
             .order_by(desc(TempReceivingReport.created_at))  # Order from newest to oldest
         )
 
-        # Return All the result
-        return stmt.all()
+        if stmt:
+            if record_id:
+                stmt = stmt.filter(TempReceivingReport.id == record_id)
 
+
+            return stmt.all()
+        else:
+            return []
 
 
 
@@ -148,7 +153,7 @@ class TempReceivingReportCRUD(AppCRUD):
 
 
 
-    def get_historical_receiving_report(self):
+    def get_historical_receiving_report(self, record_id):
         """
         Join StockOnHand, ReceivingReport, Warehouse, and RawMaterial tables.
         """
@@ -183,8 +188,13 @@ class TempReceivingReportCRUD(AppCRUD):
             )
         )
 
-        # Return All the result
-        return stmt.all()
+        if stmt:
+            if record_id:
+                stmt = stmt.filter(TempReceivingReport.id == record_id)
+
+            return stmt.all()
+        else:
+            return []
 
     def update_receiving_report(self, receiving_report_id: UUID, receiving_report_update: TempReceivingReportUpdate):
 

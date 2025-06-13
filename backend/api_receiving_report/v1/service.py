@@ -26,9 +26,10 @@ class TempReceivingReportService(AppService):
 
         return receiving_report_item
 
-    def get_receiving_report(self):
+    def get_receiving_report(self,
+                             record_id=None):
         try:
-            receiving_report_item = TempReceivingReportCRUD(self.db).get_receiving_report()
+            receiving_report_item = TempReceivingReportCRUD(self.db).get_receiving_report(record_id)
 
         except Exception as e:
             raise TempReceivingReportNotFoundException(detail=f"Error: {str(e)}")
@@ -43,13 +44,14 @@ class TempReceivingReportService(AppService):
         return receiving_report_item
 
 
-    def get_historical_receiving_report(self):
+    def get_historical_receiving_report(self, record_id):
         try:
-            receiving_report_item = TempReceivingReportCRUD(self.db).get_historical_receiving_report()
+            receiving_report_item = TempReceivingReportCRUD(self.db).get_historical_receiving_report(record_id)
 
         except Exception as e:
             raise TempReceivingReportNotFoundException(detail=f"Error: {str(e)}")
         return receiving_report_item
+
 
     # This is the service/business logic in updating the receiving_report.
     def update_receiving_report(self, receiving_report_id: UUID, receiving_report_update: TempReceivingReportUpdate):

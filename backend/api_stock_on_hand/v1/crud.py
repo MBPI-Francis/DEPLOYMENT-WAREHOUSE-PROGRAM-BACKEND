@@ -76,7 +76,6 @@ class StockOnHandCRUD(AppCRUD):
 
 
             return stmt.all()
-
         else:
             return []
 

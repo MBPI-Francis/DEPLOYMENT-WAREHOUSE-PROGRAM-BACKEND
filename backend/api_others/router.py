@@ -1,5 +1,7 @@
 from fastapi import HTTPException
 from fastapi import APIRouter, Depends
+
+from backend.api_adjustment_form.v1_form_entries.models import AdjustmentFormCorrect
 from backend.settings.database import get_db
 from sqlalchemy import text
 from datetime import date
@@ -159,6 +161,7 @@ async def update_date_computed(db: get_db = Depends()):
         TempReceivingReport,
         TempHeldForm,
         SpillageAdjustmentForm,
+        AdjustmentFormCorrect
     ]
 
     updated_tables = []

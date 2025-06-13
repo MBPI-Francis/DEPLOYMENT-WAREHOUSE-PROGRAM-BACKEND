@@ -22,8 +22,8 @@ async def read_deleted_outgoing_report(db: get_db = Depends()):
     return result
 
 @router.get("/list/historical/", response_model=list[OutgoingFormResponse])
-async def read_historical_outgoing_report(db: get_db = Depends()):
-    result = TempOutgoingReportService(db).get_historical_outgoing_report()
+async def read_historical_outgoing_report(outgoing_report_id: UUID = None, db: get_db = Depends()):
+    result = TempOutgoingReportService(db).get_historical_outgoing_report(outgoing_report_id)
     return result
 
 @router.put("/update/{outgoing_report_id}/", response_model=list[OutgoingFormResponse])

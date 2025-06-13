@@ -107,7 +107,7 @@ class TempOutgoingReportCRUD(AppCRUD):
         # Return All the result
         return stmt.all()
 
-    def get_historical_outgoing_report(self):
+    def get_historical_outgoing_report(self, record_id):
         """
              Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
              """
@@ -141,8 +141,13 @@ class TempOutgoingReportCRUD(AppCRUD):
             )
         )
 
-        # Return All the result
-        return stmt.all()
+        if stmt:
+            if record_id:
+                stmt = stmt.filter(TempOutgoingReport.id == record_id)
+
+            return stmt.all()
+        else:
+            return []
 
     def update_outgoing_report(self, outgoing_report_id: UUID, outgoing_report_update: OutgoingFormUpdate):
         try:
