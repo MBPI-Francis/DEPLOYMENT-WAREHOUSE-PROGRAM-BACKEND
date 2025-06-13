@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from backend.api_change_status_form.v1.schemas import TempHeldFormCreate, TempHeldFormUpdate, TempHeldFormResponse, TempHeldForm
 from backend.api_change_status_form.v1.service import TempHeldFormService
@@ -24,8 +26,8 @@ async def read_deleted_held_form(db: get_db = Depends()):
 
 
 @router.get("/list/historical/", response_model=list[TempHeldFormResponse])
-async def read_historical_held_form(db: get_db = Depends()):
-    result = TempHeldFormService(db).get_historical_held_form()
+async def read_historical_held_form(record_id: Optional[UUID] = None, db: get_db = Depends()):
+    result = TempHeldFormService(db).get_historical_held_form(record_id)
     return result
 
 @router.put("/update/{held_form_id}/", response_model=list[TempHeldFormResponse])

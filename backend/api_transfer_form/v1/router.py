@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from backend.api_transfer_form.v1.schemas import TempTransferFormCreate, TempTransferFormUpdate, TempTransferFormResponse, TempTransferForm
@@ -23,8 +25,8 @@ async def read_deleted_transfer_form(db: get_db = Depends()):
     return result
 
 @router.get("/list/historical/", response_model=list[TempTransferFormResponse])
-async def read_historical_transfer_form(db: get_db = Depends()):
-    result = TempTransferFormService(db).get_historical_transfer_form()
+async def read_historical_transfer_form(record_id: Optional[UUID] = None, db: get_db = Depends()):
+    result = TempTransferFormService(db).get_historical_transfer_form(record_id)
     return result
 
 @router.put("/update/{transfer_form_id}/", response_model=list[TempTransferFormResponse])

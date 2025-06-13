@@ -36,9 +36,9 @@ class TempTransferFormService(AppService):
         return transfer_form_item
 
 
-    def get_historical_transfer_form(self):
+    def get_historical_transfer_form(self, record_id):
         try:
-            transfer_form_item = TempTransferFormCRUD(self.db).get_historical_transfer_form()
+            transfer_form_item = TempTransferFormCRUD(self.db).get_historical_transfer_form(record_id)
 
         except Exception as e:
             raise TempTransferFormNotFoundException(detail=f"Error: {str(e)}")

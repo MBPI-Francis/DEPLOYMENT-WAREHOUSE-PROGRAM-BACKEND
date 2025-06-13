@@ -35,9 +35,9 @@ class TempHeldFormService(AppService):
         return held_form_item
 
 
-    def get_historical_held_form(self):
+    def get_historical_held_form(self, record_id):
         try:
-            held_form_item = TempHeldFormCRUD(self.db).get_historical_held_form()
+            held_form_item = TempHeldFormCRUD(self.db).get_historical_held_form(record_id)
 
         except Exception as e:
             raise TempHeldFormNotFoundException(detail=f"Error: {str(e)}")

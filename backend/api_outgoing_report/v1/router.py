@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from backend.api_outgoing_report.v1.schemas import OutgoingFormCreate, OutgoingFormUpdate, OutgoingFormResponse, OutgoingForm
 from backend.api_outgoing_report.v1.service import TempOutgoingReportService
@@ -22,8 +24,8 @@ async def read_deleted_outgoing_report(db: get_db = Depends()):
     return result
 
 @router.get("/list/historical/", response_model=list[OutgoingFormResponse])
-async def read_historical_outgoing_report(outgoing_report_id: UUID = None, db: get_db = Depends()):
-    result = TempOutgoingReportService(db).get_historical_outgoing_report(outgoing_report_id)
+async def read_historical_outgoing_report(record_id: Optional[str] = None, db: get_db = Depends()):
+    result = TempOutgoingReportService(db).get_historical_outgoing_report(record_id)
     return result
 
 @router.put("/update/{outgoing_report_id}/", response_model=list[OutgoingFormResponse])

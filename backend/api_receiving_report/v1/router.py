@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import Optional
 from backend.api_receiving_report.v1.schemas import TempReceivingReportCreate, TempReceivingReportUpdate, TempReceivingReportResponse, TempReceivingReport
 from backend.api_receiving_report.v1.service import TempReceivingReportService
 from backend.settings.database import get_db
@@ -28,7 +29,7 @@ async def get_deleted_receiving_report(db: get_db = Depends()):
 
 
 @router.get("/list/historical/", response_model=list[TempReceivingReportResponse])
-async def get_historical_receiving_report(record_id: UUID = None,
+async def get_historical_receiving_report(record_id: Optional[UUID] = None,
                                             db: get_db = Depends()):
     result = TempReceivingReportService(db).get_historical_receiving_report(record_id)
     return result

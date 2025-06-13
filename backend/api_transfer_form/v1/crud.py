@@ -167,7 +167,7 @@ class TempTransferFormCRUD(AppCRUD):
         return stmt.all()
 
 
-    def get_historical_transfer_form(self):
+    def get_historical_transfer_form(self, record_id):
 
         # Create aliases for the Warehouse model
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
@@ -210,8 +210,13 @@ class TempTransferFormCRUD(AppCRUD):
             )
         )
 
-        # Return filtered results
-        return stmt.all()
+        if stmt:
+            if record_id:
+                stmt = stmt.filter(TempTransferForm.id == record_id)
+
+            return stmt.all()
+        else:
+            return []
 
 
     def update_transfer_form(self, transfer_form_id: UUID, transfer_form_update: TempTransferFormUpdate):

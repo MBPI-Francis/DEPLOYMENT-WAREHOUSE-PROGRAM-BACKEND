@@ -196,7 +196,7 @@ class TempHeldFormCRUD(AppCRUD):
 
 
 
-    def get_historical_held_form(self):
+    def get_historical_held_form(self, record_id):
 
         """
              Join StockOnHand, TempHeldForm, Warehouse, and RawMaterial tables.
@@ -241,13 +241,13 @@ class TempHeldFormCRUD(AppCRUD):
 
         )
 
-        if stmt.all():
-            # Return All the result
-            return stmt.all()
+        if stmt:
+            if record_id:
+                stmt = stmt.filter(TempHeldForm.id == record_id)
 
+            return stmt.all()
         else:
             return []
-
 
     def update_held_form(self, held_form_id: UUID, held_form_update: TempHeldFormUpdate):
         try:
