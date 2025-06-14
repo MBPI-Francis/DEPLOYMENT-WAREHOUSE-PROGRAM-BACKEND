@@ -55,6 +55,7 @@ class AdjustmentFormUpdate(AdjustmentForm):
 
 class AdjustmentFormResponse(BaseModel):
     id: UUID
+    adjustment_parent_id: UUID
     incorrect_preparation_id: Optional[UUID] = None
     incorrect_receiving_id: Optional[UUID] = None
     incorrect_outgoing_id: Optional[UUID] = None

@@ -253,7 +253,7 @@ class TempHeldFormCRUD(AppCRUD):
         try:
             held_form = self.db.query(TempHeldForm).filter(TempHeldForm.id == held_form_id).first()
             if not held_form or held_form.is_deleted:
-                raise TempHeldFormNotFoundException(detail="Held Form not found or already deleted.")
+                raise TempHeldFormNotFoundException(detail="Change status record not found or already deleted.")
 
             for key, value in held_form_update.dict(exclude_unset=True).items():
                 setattr(held_form, key, value)
@@ -268,7 +268,7 @@ class TempHeldFormCRUD(AppCRUD):
         try:
             held_form = self.db.query(TempHeldForm).filter(TempHeldForm.id == held_form_id).first()
             if not held_form or held_form.is_deleted:
-                raise TempHeldFormNotFoundException(detail="Held Form not found or already deleted.")
+                raise TempHeldFormNotFoundException(detail="Change status record not found or already deleted.")
 
             held_form.is_deleted = True
             self.db.commit()

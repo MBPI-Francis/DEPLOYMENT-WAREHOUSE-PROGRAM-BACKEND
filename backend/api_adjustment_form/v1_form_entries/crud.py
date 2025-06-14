@@ -160,6 +160,7 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
                 self.db.flush()  # Apply the update in the current transaction
 
+
             child_record = AdjustmentFormCorrect(
                 adjustment_parent_id=parent_record.id,
                 rm_code_id=adjustment_form.rm_code_id,
@@ -219,6 +220,7 @@ class AdjustmentFormCRUD(AppCRUD):
                 AdjustmentFormCorrect.incorrect_preparation_id == adjustment_form.incorrect_preparation_id,
                 AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
             ).first()
+
 
             if existing_correct_record:
                 # Update existing record and mark it as deleted
@@ -405,6 +407,7 @@ class AdjustmentFormCRUD(AppCRUD):
         stmt = (
             self.db.query(
                 AdjustmentFormCorrect.id,
+                AdjustmentFormCorrect.adjustment_parent_id,
                 AdjustmentFormCorrect.incorrect_preparation_id,
                 AdjustmentFormCorrect.incorrect_receiving_id,
                 AdjustmentFormCorrect.incorrect_outgoing_id,
@@ -492,6 +495,7 @@ class AdjustmentFormCRUD(AppCRUD):
         stmt = (
             self.db.query(
                 AdjustmentFormCorrect.id,
+                AdjustmentFormCorrect.adjustment_parent_id,
                 AdjustmentFormCorrect.incorrect_preparation_id,
                 AdjustmentFormCorrect.incorrect_receiving_id,
                 AdjustmentFormCorrect.incorrect_outgoing_id,
@@ -570,6 +574,7 @@ class AdjustmentFormCRUD(AppCRUD):
         stmt = (
             self.db.query(
                 AdjustmentFormCorrect.id,
+                AdjustmentFormCorrect.adjustment_parent_id,
                 AdjustmentFormCorrect.incorrect_preparation_id,
                 AdjustmentFormCorrect.incorrect_receiving_id,
                 AdjustmentFormCorrect.incorrect_outgoing_id,
@@ -637,46 +642,203 @@ class AdjustmentFormCRUD(AppCRUD):
         # Return All the result
         return stmt.all()
 
-    # def update_adjustment_form(self, adjustment_form_id: UUID, adjustment_form_update: AdjustmentFormUpdate):
-    #     try:
-    #         adjustment_form = self.db.query(AdjustmentForm).filter(AdjustmentForm.id == adjustment_form_id).first()
-    #         if not adjustment_form or adjustment_form.is_deleted:
-    #             raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already deleted.")
-    #
-    #         for key, value in adjustment_form_update.dict(exclude_unset=True).items():
-    #             setattr(adjustment_form, key, value)
-    #         self.db.commit()
-    #         self.db.refresh(adjustment_form)
-    #         return self.get_adjustment_form()
-    #
-    #     except Exception as e:
-    #         raise AdjustmentFormUpdateException(detail=f"Error: {str(e)}")
-    #
-    # def soft_delete_adjustment_form(self, adjustment_form_id: UUID):
-    #     try:
-    #         adjustment_form = self.db.query(AdjustmentForm).filter(AdjustmentForm.id == adjustment_form_id).first()
-    #         if not adjustment_form or adjustment_form.is_deleted:
-    #             raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already deleted.")
-    #
-    #         adjustment_form.is_deleted = True
-    #         self.db.commit()
-    #         self.db.refresh(adjustment_form)
-    #         return self.get_adjustment_form()
-    #
-    #     except Exception as e:
-    #         raise AdjustmentFormSoftDeleteException(detail=f"Error: {str(e)}")
-    #
-    #
-    # def restore_adjustment_form(self, adjustment_form_id: UUID):
-    #     try:
-    #         adjustment_form = self.db.query(AdjustmentForm).filter(AdjustmentForm.id == adjustment_form_id).first()
-    #         if not adjustment_form or not adjustment_form.is_deleted:
-    #             raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already restored.")
-    #
-    #         adjustment_form.is_deleted = False
-    #         self.db.commit()
-    #         self.db.refresh(adjustment_form)
-    #         return adjustment_form
-    #
-    #     except Exception as e:
-    #         raise AdjustmentFormRestoreException(detail=f"Error: {str(e)}")
+    def update_adjustment_form(self, adjustment_form_id: UUID, adjustment_form_update: AdjustmentFormUpdate):
+        try:
+            # Check if the status id is null
+            query = text("""SELECT * FROM view_beginning_soh
+                                    WHERE warehouseid = :warehouse_id
+                                          AND rawmaterialid = :rm_code_id
+                                          AND statusid = :status_id""")
+
+
+            if adjustment_form_update.current_status_id and adjustment_form_update.new_status_id:
+                record = self.db.execute(query, {
+                    "warehouse_id": adjustment_form_update.warehouse_id,
+                    "rm_code_id": adjustment_form_update.rm_code_id,
+                    "status_id": adjustment_form_update.new_status_id
+                }).fetchone()  # or .fetchall() if expecting multiple rows
+                result = record
+
+                # This feature is required for the calculation
+                if not result:
+                    # Get the date computed date from other existing records
+                    existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                    existing_record = self.db.execute(
+                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                    # Extract date_computed if record exists, else use None
+                    date_computed = existing_record[9] if existing_record else None
+
+                    # Extract the stock_recalculation_count value
+                    stock_recalculation_count = existing_record[10] if existing_record else None
+
+                    # Create a new StockOnHand record
+                    new_stock = StockOnHand(
+                        rm_code_id=adjustment_form_update.rm_code_id,
+                        warehouse_id=adjustment_form_update.warehouse_id,
+                        rm_soh=0.00,
+                        status_id=adjustment_form_update.new_status_id,
+                        date_computed=date_computed,
+                        stock_recalculation_count=stock_recalculation_count
+                        # Insert retrieved stock_recalculation_count
+                    )
+                    self.db.add(new_stock)
+                    self.db.commit()
+                    self.db.refresh(new_stock)
+
+
+
+
+            elif adjustment_form_update.from_warehouse_id and adjustment_form_update.to_warehouse_id:
+                record = self.db.execute(query, {
+                    "warehouse_id": adjustment_form_update.to_warehouse_id,
+                    "rm_code_id": adjustment_form_update.rm_code_id,
+                    "status_id": adjustment_form_update.status_id
+                }).fetchone()  # or .fetchall() if expecting multiple rows
+                result = record
+
+                # This feature is required for the calculation
+                if not result:
+                    # Get the date computed date from other existing records
+                    existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                    existing_record = self.db.execute(
+                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                    # Extract date_computed if record exists, else use None
+                    date_computed = existing_record[9] if existing_record else None
+
+                    # Extract the stock_recalculation_count value
+                    stock_recalculation_count = existing_record[10] if existing_record else None
+
+                    # Create a new StockOnHand record
+                    new_stock = StockOnHand(
+                        rm_code_id=adjustment_form_update.rm_code_id,
+                        warehouse_id=adjustment_form_update.to_warehouse_id,
+                        rm_soh=0.00,
+                        status_id=adjustment_form_update.status_id,
+                        date_computed=date_computed,
+                        stock_recalculation_count=stock_recalculation_count
+                        # Insert retrieved stock_recalculation_count
+                    )
+                    self.db.add(new_stock)
+                    self.db.commit()
+                    self.db.refresh(new_stock)
+
+            else:
+                record = self.db.execute(query, {
+                    "warehouse_id": adjustment_form_update.warehouse_id,
+                    "rm_code_id": adjustment_form_update.rm_code_id,
+                    "status_id": adjustment_form_update.status_id
+                }).fetchone()  # or .fetchall() if expecting multiple rows
+                result = record
+
+                # This feature is required for the calculation
+                if not result:
+                    # Get the date computed date from other existing records
+                    existing_query = text("""SELECT * FROM view_beginning_soh""")
+
+                    existing_record = self.db.execute(
+                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+
+                    # Extract date_computed if record exists, else use None
+                    date_computed = existing_record[9] if existing_record else None
+
+                    # Extract the stock_recalculation_count value
+                    stock_recalculation_count = existing_record[10] if existing_record else None
+
+                    # Create a new StockOnHand record
+                    new_stock = StockOnHand(
+                        rm_code_id=adjustment_form_update.rm_code_id,
+                        warehouse_id=adjustment_form_update.warehouse_id,
+                        rm_soh=0.00,
+                        status_id=adjustment_form_update.status_id,
+                        date_computed=date_computed,
+                        stock_recalculation_count=stock_recalculation_count
+                        # Insert retrieved stock_recalculation_count
+                    )
+                    self.db.add(new_stock)
+                    self.db.commit()
+                    self.db.refresh(new_stock)
+
+
+            # 1. Fetch child record
+            child_record = self.db.query(AdjustmentFormCorrect).filter(
+                AdjustmentFormCorrect.adjustment_parent_id == adjustment_form_id,
+                AdjustmentFormCorrect.is_deleted == False
+            ).first()
+
+            if not child_record:
+                raise AdjustmentFormNotFoundException(detail="Child record not found or already deleted.")
+
+            # 2. Fetch parent record
+            parent_record = self.db.query(AdjustmentFormParent).filter(
+                AdjustmentFormParent.id == adjustment_form_id
+            ).first()
+
+            if not parent_record:
+                raise AdjustmentFormNotFoundException(detail="Parent record not found.")
+
+            update_data = adjustment_form_update.dict(exclude_unset=True)
+
+            # 3. Update parent fields
+            parent_fields = [
+                "ref_number", "adjustment_date", "referenced_date",
+                "adjustment_type", "responsible_person"
+            ]
+
+            for field in parent_fields:
+                if field in update_data:
+                    setattr(parent_record, field, update_data[field])
+
+            # 4. Update child fields (all remaining fields go to child)
+            child_fields = set(update_data.keys()) - set(parent_fields)
+            for field in child_fields:
+                setattr(child_record, field, update_data[field])
+
+            self.db.commit()
+            self.db.refresh(parent_record)
+            self.db.refresh(child_record)
+
+            return {
+                "parent": parent_record,
+                "child": child_record
+            }
+
+        except Exception as e:
+            raise AdjustmentFormUpdateException(detail=f"Error: {str(e)}")
+
+    def soft_delete_adjustment_form(self, adjustment_form_id: UUID):
+        try:
+            adjustment_form = (self.db.query(AdjustmentFormCorrect)
+                               .filter(AdjustmentFormCorrect.id == adjustment_form_id)
+                               .first())
+
+            if not adjustment_form or adjustment_form.is_deleted:
+                raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already deleted.")
+
+            adjustment_form.is_deleted = True
+            self.db.commit()
+            self.db.refresh(adjustment_form)
+            return self.get_adjustment_form()
+
+        except Exception as e:
+            raise AdjustmentFormSoftDeleteException(detail=f"Error: {str(e)}")
+
+
+    def restore_adjustment_form(self, adjustment_form_id: UUID):
+        try:
+            adjustment_form = (self.db.query(AdjustmentFormCorrect).
+                               filter(AdjustmentFormCorrect.id == adjustment_form_id)
+                               .first())
+            if not adjustment_form or not adjustment_form.is_deleted:
+                raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already restored.")
+
+            adjustment_form.is_deleted = False
+            self.db.commit()
+            self.db.refresh(adjustment_form)
+            return adjustment_form
+
+        except Exception as e:
+            raise AdjustmentFormRestoreException(detail=f"Error: {str(e)}")

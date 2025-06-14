@@ -54,7 +54,7 @@ async def read_historical_adjustment_form(db: get_db = Depends()):
     result = AdjustmentFormService(db).get_historical_adjustment_form()
     return result
 
-@router.put("/update/{adjustment_form_id}/", response_model=list[AdjustmentFormResponse])
+@router.put("/update/{adjustment_form_id}/")
 async def update_adjustment_form(adjustment_form_id: UUID, adjustment_form_update: AdjustmentFormUpdate, db: get_db = Depends()):
     result = AdjustmentFormService(db).update_adjustment_form(adjustment_form_id, adjustment_form_update)
     return result
