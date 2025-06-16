@@ -1,3 +1,5 @@
+from fastapi import HTTPException
+
 from backend.api_adjustment_form.v1_form_entries.exceptions import (AdjustmentFormNotFoundException,
                                                                 AdjustmentFormUpdateException,
                                                                 AdjustmentFormSoftDeleteException,
@@ -842,3 +844,70 @@ class AdjustmentFormCRUD(AppCRUD):
 
         except Exception as e:
             raise AdjustmentFormRestoreException(detail=f"Error: {str(e)}")
+
+    def validate_adjustment_outgoing_form(
+            self,
+            incorrect_record_id,
+            rm_id,
+            warehouse_id,
+            entered_qty,
+            status_id
+    ):
+        try:
+
+            outgoing_record_qty = text(f"""SELECT 
+                                                rm_code_id,
+                                                qty_kg 
+                                                FROM public.tbl_outgoing_reports
+                                            WHERE id = '{incorrect_record_id}'
+                                                """)
+
+            new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
+                                       WHERE warehouseid = '{warehouse_id}'
+                                               AND statusid = '{status_id}'
+                                               AND rawmaterialid = '{rm_id}'
+                                                """)
+
+            result = self.db.execute(new_beginning_query)
+            beginning_balance = result.fetchone()
+
+            # Check if there is a record after executing the query
+
+            # if beginning_balance:
+            #
+            #
+            #
+            # else:
+            #     return False
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def validate_adjustment_preparation_form(
+            self,
+            incorrect_record_id,
+            rm_id,
+            warehouse_id,
+            entered_qty,
+            status_id
+    ):
+        return
+
+    def validate_adjustment_transfer_form(
+            self,
+            incorrect_record_id,
+            rm_id,
+            warehouse_id,
+            entered_qty,
+            status_id
+    ):
+        return
+
+    def validate_adjustment_change_status_form(
+            self,
+            incorrect_record_id,
+            rm_id,
+            warehouse_id,
+            entered_qty,
+            status_id
+    ):
+        return

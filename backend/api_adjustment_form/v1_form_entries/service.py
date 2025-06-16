@@ -52,10 +52,58 @@ class AdjustmentFormService(AppService):
         adjustment_form = AdjustmentFormCRUD(self.db).soft_delete_adjustment_form(adjustment_form_id)
         return adjustment_form
 
-
     # This is the service/business logic in soft restoring the adjustment_form.
     def restore_adjustment_form(self, adjustment_form_id: UUID):
         adjustment_form = AdjustmentFormCRUD(self.db).restore_adjustment_form(adjustment_form_id)
+        return adjustment_form
+
+    # This is the service/business logic in soft restoring the adjustment_form.
+    def validate_adjustment_form(
+        self,
+        form,
+        incorrect_record_id,
+        rm_id,
+        warehouse_id,
+        entered_qty,
+        status_id
+    ):
+
+        if form == "outgoing":
+            adjustment_form = AdjustmentFormCRUD(self.db).validate_adjustment_outgoing_form(
+                incorrect_record_id,
+                rm_id,
+                warehouse_id,
+                entered_qty,
+                status_id
+            )
+
+        elif form == "preparation":
+            adjustment_form = AdjustmentFormCRUD(self.db).validate_adjustment_preparation_form(
+                incorrect_record_id,
+                rm_id,
+                warehouse_id,
+                entered_qty,
+                status_id
+            )
+
+        elif form == "transfer":
+            adjustment_form = AdjustmentFormCRUD(self.db).validate_adjustment_transfer_form(
+                incorrect_record_id,
+                rm_id,
+                warehouse_id,
+                entered_qty,
+                status_id
+            )
+
+        elif form == "change status":
+            adjustment_form = AdjustmentFormCRUD(self.db).validate_adjustment_change_status_form(
+                incorrect_record_id,
+                rm_id,
+                warehouse_id,
+                entered_qty,
+                status_id
+            )
+
         return adjustment_form
 
 

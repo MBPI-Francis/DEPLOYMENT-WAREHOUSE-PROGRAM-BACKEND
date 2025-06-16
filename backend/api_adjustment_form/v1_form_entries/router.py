@@ -69,3 +69,22 @@ async def delete_adjustment_form(adjustment_form_id: UUID, db: get_db = Depends(
     result = AdjustmentFormService(db).soft_delete_adjustment_form(adjustment_form_id)
     return result
 
+
+@router.get("/entry_validation/", response_model=list[AdjustmentFormResponse])
+async def validate_adjusment_form(
+        form: str,
+        incorrect_record_id: UUID,
+        rm_id: UUID,
+        warehouse_id: UUID,
+        entered_qty: float,
+        status_id: UUID,
+        db: get_db = Depends()):
+    result = AdjustmentFormService(db).get_historical_adjustment_form(
+        form,
+        incorrect_record_id,
+        rm_id,
+        warehouse_id,
+        entered_qty,
+        status_id
+    )
+    return result
