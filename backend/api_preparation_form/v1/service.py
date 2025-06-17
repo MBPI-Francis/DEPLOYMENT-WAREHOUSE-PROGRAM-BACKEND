@@ -35,9 +35,9 @@ class TempPreparationFormService(AppService):
         return preparation_form_item
 
 
-    def get_historical_preparation_form(self):
+    def get_historical_preparation_form(self, record_id):
         try:
-            preparation_form_item = TempPreparationFormCRUD(self.db).get_historical_preparation_form()
+            preparation_form_item = TempPreparationFormCRUD(self.db).get_historical_preparation_form(record_id)
 
         except Exception as e:
             raise TempPreparationFormNotFoundException(detail=f"Error: {str(e)}")

@@ -108,7 +108,7 @@ class TempPreparationFormCRUD(AppCRUD):
         # Return All the result
         return stmt.all()
 
-    def get_historical_preparation_form(self):
+    def get_historical_preparation_form(self, record_id):
 
         """
              Join StockOnHand, TempPreparationForm, Warehouse, and RawMaterial tables.
@@ -148,8 +148,13 @@ class TempPreparationFormCRUD(AppCRUD):
             )
         )
 
-        # Return All the result
-        return stmt.all()
+        if stmt:
+            if record_id:
+                stmt = stmt.filter(TempPreparationForm.id == record_id)
+
+            return stmt.all()
+        else:
+            return []
 
 
 
