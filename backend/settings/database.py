@@ -3,6 +3,9 @@ from sqlalchemy.orm import  sessionmaker, declarative_base
 # from sqlalchemy.ext.declarative import declarative_base
 import psycopg2
 
+# Backup path: This is where the db backup will be saved
+BACKUP_FOLDER = r"D:\RMBackups"
+
 # The DATABASE_URL variable is the connection string (also known as a database URL) used to specify how to connect to your PostgreSQL database.
 
 # Uncomment this if you want to use the RMDummyDB Database. This is the database for development

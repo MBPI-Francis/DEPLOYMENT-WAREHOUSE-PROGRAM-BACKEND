@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from backend._app.scheduler import start_scheduler
 from backend.api_users.v1 import router as user_router
 from backend.api_warehouses.v1 import router as warehouse_router
 from backend.api_raw_materials.v1 import router as raw_material_router
@@ -35,6 +36,9 @@ def startup_event():
     create_ending_view_table()
     create_product_kind()
     create_adjusted_ending_view_table()
+    start_scheduler()
+    print("[INFO] Scheduler started")
+
 
 
 # These code includes all the routers/endpoint of the api_users
