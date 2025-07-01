@@ -14,12 +14,8 @@ async def create_receiving_report(receiving_report: TempReceivingReportCreate, d
     return result
 
 @router.get("/list/", response_model=list[TempReceivingReportResponse])
-async def get_receiving_report(
-        record_id: UUID = None,
-        db: get_db = Depends()):
-    result = TempReceivingReportService(db).get_receiving_report(
-        record_id
-    )
+async def get_receiving_report(db: get_db = Depends()):
+    result = TempReceivingReportService(db).get_receiving_report()
     return result
 
 @router.get("/list/deleted/", response_model=list[TempReceivingReportResponse])

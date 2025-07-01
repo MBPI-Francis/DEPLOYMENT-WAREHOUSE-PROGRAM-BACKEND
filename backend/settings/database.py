@@ -4,7 +4,7 @@ from sqlalchemy.orm import  sessionmaker, declarative_base
 import psycopg2
 
 # Backup path: This is where the db backup will be saved
-BACKUP_FOLDER = r"D:\RMBackups"
+BACKUP_FOLDER = r"\\system-server\IT\Francis-Program-Projects\DB BACKUPS\WAREHOUSE PROGRAM"
 
 # The DATABASE_URL variable is the connection string (also known as a database URL) used to specify how to connect to your PostgreSQL database.
 
@@ -12,13 +12,13 @@ BACKUP_FOLDER = r"D:\RMBackups"
 # DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMDummyDB"
 
 # Uncomment this if you want to use the RMManagementSystemDB Database. This is the database for deployment
-DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMManagementSystemDB"
+# DATABASE_URL = "postgresql://postgres:mbpi@192.168.1.13:5432/RMManagementSystemDB"
 
 # Uncomment this if you want to use the RMManagementSystemDB Database in your own computer/laptop. This is the database for development
 # DATABASE_URL = "postgresql://postgres:331212@localhost:5432/RMManagementSystemDB"
 
 # This url is for sir Elton. You can uncomment  (With Password)
-# DATABASE_URL = "postgresql://postgres:newpassword@localhost:5433/RMManagementSystemDB"
+DATABASE_URL = "postgresql://postgres:newpassword@localhost:5433/RMManagementSystemDB"
 
 # This url is for sir Elton. You can uncomment this (Without Password)
 # DATABASE_URL = "postgresql://postgres@localhost:5432/RMManagementSystemDB"

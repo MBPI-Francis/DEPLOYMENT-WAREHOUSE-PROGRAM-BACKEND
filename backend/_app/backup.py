@@ -51,5 +51,8 @@ def backup_postgres():
     try:
         subprocess.run(command, check=True, env=env)
         print(f"[✔] Backup successful: {filepath}")
+        print(f"📦 Backup triggered at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
     except subprocess.CalledProcessError as e:
         print(f"[✘] Backup failed: {e}")
+        print(f"📦 Backup triggered at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

@@ -26,10 +26,9 @@ class TempReceivingReportService(AppService):
 
         return receiving_report_item
 
-    def get_receiving_report(self,
-                             record_id=None):
+    def get_receiving_report(self):
         try:
-            receiving_report_item = TempReceivingReportCRUD(self.db).get_receiving_report(record_id)
+            receiving_report_item = TempReceivingReportCRUD(self.db).get_receiving_report()
 
         except Exception as e:
             raise TempReceivingReportNotFoundException(detail=f"Error: {str(e)}")
