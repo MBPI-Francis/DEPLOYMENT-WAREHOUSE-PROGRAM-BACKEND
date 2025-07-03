@@ -9,7 +9,12 @@ SELECT
  	(-pf.qty_prepared + pf.qty_return) AS qty,  -- net quantity
 	w.wh_name AS whse_no,
     s.name AS status,
-	pf.is_deleted
+	pf.is_deleted,
+	pf.is_cleared,
+	CASE 
+		WHEN pf.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 FROM tbl_preparation_forms pf
 JOIN tbl_raw_materials rm ON pf.rm_code_id = rm.id
 JOIN tbl_warehouses w ON pf.warehouse_id = w.id
@@ -30,7 +35,12 @@ SELECT
     -tf.qty_kg,
 	    w_from.wh_name,
     s.name,
-	tf.is_deleted
+	tf.is_deleted,
+	tf.is_cleared,
+	CASE 
+		WHEN tf.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 
 FROM tbl_transfer_forms tf
 JOIN tbl_raw_materials rm ON tf.rm_code_id = rm.id
@@ -51,7 +61,12 @@ SELECT
     tf.qty_kg,
 	    w_to.wh_name,
     s.name,
-	tf.is_deleted
+	tf.is_deleted,
+	tf.is_cleared,
+	CASE 
+		WHEN tf.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 
 FROM tbl_transfer_forms tf
 JOIN tbl_raw_materials rm ON tf.rm_code_id = rm.id
@@ -72,7 +87,12 @@ SELECT
     -hf.qty_kg,
 	    w.wh_name,
     s_current.name,
-	hf.is_deleted
+	hf.is_deleted,
+	hf.is_cleared,
+	CASE 
+		WHEN hf.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 
 FROM tbl_held_forms hf
 JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
@@ -93,7 +113,12 @@ SELECT
     hf.qty_kg,
 	    w.wh_name,
     s_new.name,
-	hf.is_deleted
+	hf.is_deleted,
+	hf.is_cleared,
+	CASE 
+		WHEN hf.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 
 FROM tbl_held_forms hf
 JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
@@ -114,7 +139,12 @@ SELECT
     rr.qty_kg,
 	    w.wh_name,
     s.name,
-	rr.is_deleted
+	rr.is_deleted,
+	rr.is_cleared,
+	CASE 
+		WHEN rr.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 
 FROM tbl_receiving_reports rr
 JOIN tbl_raw_materials rm ON rr.rm_code_id = rm.id
@@ -135,7 +165,12 @@ SELECT
     -outgoing.qty_kg,
 	    w.wh_name,
     s.name,
-	outgoing.is_deleted
+	outgoing.is_deleted,
+	outgoing.is_cleared,
+	CASE 
+		WHEN outgoing.date_computed IS NOT NULL THEN 'Yes'
+		ELSE 'No'
+	END AS is_computed
 
 FROM tbl_outgoing_reports outgoing
 JOIN tbl_raw_materials rm ON outgoing.rm_code_id = rm.id
