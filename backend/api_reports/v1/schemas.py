@@ -1,13 +1,21 @@
-# Schemas serialize and validate data. Below are the codes for defining Pydantic Schemas
 
 from pydantic import BaseModel
-from decimal import Decimal
+from typing import Optional
+from datetime import date
 
 
-class DeviationReportResponse(BaseModel):
-    rm: str
-    francis_qty: Decimal
-    jarick_qty: Decimal
-    deviation: Decimal
+class FormEntryResponse(BaseModel):
+    date_encoded: date
+    date_reported: date
+    document_type: str
+    document_number: str
+    mat_code: str
+    qty: float
+    whse_no: str
+    status: str
+    is_deleted: Optional[bool]
+    is_cleared: Optional[bool]
+    is_computed: str
 
-
+    class Config:
+        from_attributes = True
