@@ -22,7 +22,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON pf.rm_code_id = rm.id
 	JOIN tbl_warehouses w ON pf.warehouse_id = w.id
 	LEFT JOIN tbl_status s ON pf.status_id = s.id
-	WHERE pf.date_computed IS NOT NULL
 	-- WHERE pf.is_deleted IS DISTINCT FROM true
 	
 	
@@ -50,7 +49,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON tf.rm_code_id = rm.id
 	JOIN tbl_warehouses w_from ON tf.from_warehouse_id = w_from.id
 	LEFT JOIN tbl_status s ON tf.status_id = s.id
-	WHERE tf.date_computed IS NOT NULL
 	-- WHERE tf.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -77,7 +75,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON tf.rm_code_id = rm.id
 	JOIN tbl_warehouses w_to ON tf.to_warehouse_id = w_to.id
 	LEFT JOIN tbl_status s ON tf.status_id = s.id
-	WHERE tf.date_computed IS NOT NULL
 	-- WHERE tf.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -104,7 +101,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
 	JOIN tbl_warehouses w ON hf.warehouse_id = w.id
 	LEFT JOIN tbl_status s_current ON hf.current_status_id = s_current.id
-	WHERE hf.date_computed IS NOT NULL
 	-- WHERE hf.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -131,7 +127,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
 	JOIN tbl_warehouses w ON hf.warehouse_id = w.id
 	LEFT JOIN tbl_status s_new ON hf.new_status_id = s_new.id
-	WHERE hf.date_computed IS NOT NULL
 	-- WHERE hf.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -158,7 +153,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON rr.rm_code_id = rm.id
 	JOIN tbl_warehouses w ON rr.warehouse_id = w.id
 	LEFT JOIN tbl_status s ON rr.status_id = s.id
-	WHERE rr.date_computed IS NOT NULL
 	-- WHERE rr.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -185,7 +179,6 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON outgoing.rm_code_id = rm.id
 	JOIN tbl_warehouses w ON outgoing.warehouse_id = w.id
 	LEFT JOIN tbl_status s ON outgoing.status_id = s.id
-	WHERE outgoing.date_computed IS NOT NULL
 	-- WHERE outgoing.is_deleted IS DISTINCT FROM true
 	
 	
@@ -214,7 +207,7 @@ WITH form_entries_log AS (
 	JOIN tbl_raw_materials rm ON spillage.rm_code_id = rm.id
 	JOIN tbl_warehouses w ON spillage.warehouse_id = w.id
 	LEFT JOIN tbl_status s ON spillage.status_id = s.id
-	WHERE spillage.date_computed IS NOT NULL
+
 	
 	
 	
@@ -247,7 +240,7 @@ WITH form_entries_log AS (
 		 JOIN tbl_status s ON rr.status_id = s.id
 		 JOIN tbl_raw_materials rm ON rr.rm_code_id = rm.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 	
 	
 	UNION ALL
@@ -276,7 +269,7 @@ WITH form_entries_log AS (
 		 JOIN tbl_status s ON tac.status_id = s.id
 		 JOIN tbl_raw_materials rm ON tac.rm_code_id = rm.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 	
 	
 	
@@ -308,7 +301,7 @@ WITH form_entries_log AS (
 		 JOIN tbl_status s ON ogr.status_id = s.id
 		 JOIN tbl_raw_materials rm ON ogr.rm_code_id = rm.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 		 
 		-- IAF - OGR - CORRECT
 	UNION ALL
@@ -334,7 +327,7 @@ WITH form_entries_log AS (
 		 JOIN tbl_status s ON tac.status_id = s.id
 		 JOIN tbl_raw_materials rm ON tac.rm_code_id = rm.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 	
 	
 	
@@ -368,7 +361,7 @@ WITH form_entries_log AS (
 		 JOIN tbl_status s ON pf.status_id = s.id
 		 JOIN tbl_raw_materials rm ON pf.rm_code_id = rm.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 	
 	
 	UNION ALL
@@ -396,7 +389,7 @@ WITH form_entries_log AS (
 		 JOIN tbl_status s ON tac.status_id = s.id
 		 JOIN tbl_raw_materials rm ON tac.rm_code_id = rm.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 	
 	
 	
@@ -429,7 +422,6 @@ WITH form_entries_log AS (
 		JOIN tbl_warehouses w_from ON tf.from_warehouse_id = w_from.id
 		LEFT JOIN tbl_status s ON tf.status_id = s.id
 		JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
 	-- WHERE tf.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -459,7 +451,7 @@ WITH form_entries_log AS (
 		JOIN tbl_warehouses w_to ON tf.to_warehouse_id = w_to.id
 		LEFT JOIN tbl_status s ON tf.status_id = s.id
 		JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
+
 	-- WHERE tf.is_deleted IS DISTINCT FROM true
 	
 	
@@ -490,7 +482,6 @@ WITH form_entries_log AS (
 	JOIN tbl_warehouses w_from ON tac.from_warehouse_id = w_from.id
 	LEFT JOIN tbl_status s ON tac.status_id = s.id
 	JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
 	-- WHERE tf.is_deleted IS DISTINCT FROM true
 	
 	UNION ALL
@@ -520,7 +511,6 @@ WITH form_entries_log AS (
 	JOIN tbl_warehouses w_to ON tac.to_warehouse_id = w_to.id
 	LEFT JOIN tbl_status s ON tac.status_id = s.id
 	JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
 	
 	UNION ALL
 	-- ---------------------------[Change Status Form Queries]---------------------------
@@ -551,7 +541,6 @@ WITH form_entries_log AS (
 			JOIN tbl_warehouses w ON hf.warehouse_id = w.id
 			LEFT JOIN tbl_status s_current ON hf.current_status_id = s_current.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
 	
 	UNION ALL
 	
@@ -579,7 +568,6 @@ WITH form_entries_log AS (
 			JOIN tbl_warehouses w ON hf.warehouse_id = w.id
 			LEFT JOIN tbl_status s_new ON hf.new_status_id = s_new.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
 	
 	
 	
@@ -610,8 +598,7 @@ WITH form_entries_log AS (
 			JOIN tbl_warehouses w ON tac.warehouse_id = w.id
 			LEFT JOIN tbl_status s_current ON tac.current_status_id = s_current.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
-	
+
 	
 	UNION ALL
 	
@@ -639,10 +626,7 @@ WITH form_entries_log AS (
 			JOIN tbl_warehouses w ON tac.warehouse_id = w.id
 			LEFT JOIN tbl_status s_new ON tac.new_status_id = s_new.id
 		 JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
-	WHERE tac.date_computed IS NOT NULL
-	
-		 
-	ORDER BY date_computed desc, date_encoded desc, document_type ,mat_code, qty
+
 )
 
 SELECT 
@@ -654,6 +638,15 @@ SELECT
 	qty,
 	whse_no,
 	status,
-	is_deleted
+	is_deleted,
+	is_cleared,
+	is_computed
 FROM form_entries_log
-WHERE is_deleted = true
+WHERE 
+	date_reported >= '2025-07-01'
+	AND (
+		(date_computed IS NOT NULL AND is_deleted = false AND is_cleared = True)
+		OR is_deleted = true
+	)
+
+ORDER BY date_computed desc, date_encoded desc, document_type ,mat_code, qty
