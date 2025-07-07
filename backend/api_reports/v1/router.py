@@ -5,7 +5,7 @@ from backend.api_reports.v1.service import FormEntryService
 from backend.api_reports.v1.schemas import FormEntryResponse
 from backend.settings.database import get_db
 
-router = APIRouter(prefix="/reports/v1")
+router = APIRouter(prefix="/api/reports/v1")
 
 
 @router.get("/form-entries/", response_model=List[FormEntryResponse])
@@ -14,6 +14,8 @@ def get_form_entries(
     date_to: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
     mat_code: Optional[str] = Query(None, description="Material Code (or 'all')"),
     document_type: Optional[str] = Query(None, description="Document Type (or 'all')"),
+    location: Optional[str] = Query(None, description="Warehouse Location (or 'all')"),
+    status: Optional[str] = Query(None, description="Raw Material Status (or 'all')"),
     db: Session = Depends(get_db)
 ):
     result = FormEntryService(db).get_form_entries(
@@ -21,6 +23,8 @@ def get_form_entries(
         date_to=date_to,
         mat_code=mat_code,
         document_type=document_type,
+        location=location,
+        status=status
     )
 
     return result

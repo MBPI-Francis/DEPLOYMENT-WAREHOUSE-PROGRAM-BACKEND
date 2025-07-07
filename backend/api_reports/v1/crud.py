@@ -10,6 +10,8 @@ class FormEntryCRUD(AppCRUD):
         date_to: Optional[str] = None,
         mat_code: Optional[str] = None,
         document_type: Optional[str] = None,
+        location: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> List[FormEntryResponse]:
 
         query = """
@@ -43,6 +45,17 @@ class FormEntryCRUD(AppCRUD):
         if document_type and document_type.lower() != "all" and document_type.strip() != "":
             query += " AND document_type = :document_type"
             params["document_type"] = document_type
+
+        if location and location.lower() != "all" and location.strip() != "":
+            query += " AND whse_no = :whse_no"
+            params["whse_no"] = location
+
+
+        if status and status.lower() != "all" and status.strip() != "":
+            query += " AND status = :status"
+            params["status"] = status
+
+
 
         result = self.db.execute(text(query), params)
         rows = result.fetchall()

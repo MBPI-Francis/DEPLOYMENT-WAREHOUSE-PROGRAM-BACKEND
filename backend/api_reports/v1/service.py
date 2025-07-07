@@ -12,6 +12,8 @@ class FormEntryService(AppService):
         date_to: Optional[str],
         mat_code: Optional[str],
         document_type: Optional[str],
+        location: Optional[str],
+        status: Optional[str],
     ) -> List[FormEntryResponse]:
 
         form_entries = FormEntryCRUD(self.db).get_form_entries(
@@ -19,6 +21,8 @@ class FormEntryService(AppService):
             date_to=date_to,
             mat_code=mat_code,
             document_type=document_type,
+            location=location,
+            status=status
         )
 
         return form_entries
