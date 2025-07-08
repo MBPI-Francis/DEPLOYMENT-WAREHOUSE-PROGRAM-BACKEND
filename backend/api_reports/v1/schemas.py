@@ -13,9 +13,9 @@ class FormEntryResponse(BaseModel):
     qty: float
     whse_no: str
     status: str
-    is_deleted: Optional[bool]
-    is_cleared: Optional[bool]
-    is_computed: str
+    # is_deleted: Optional[bool]
+    # is_cleared: Optional[bool]
+    # is_computed: Optional[str]
 
     class Config:
         from_attributes = True

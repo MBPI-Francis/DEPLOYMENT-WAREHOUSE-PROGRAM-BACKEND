@@ -23,12 +23,10 @@ class FormEntryCRUD(AppCRUD):
                 mat_code,
                 qty,
                 whse_no,
-                status,
-                is_deleted,
-                is_cleared,
-                is_computed
+                status
             FROM view_form_entries_log
-            WHERE 1 = 1
+            WHERE 1 = 1 AND is_deleted = FALSE
+            
         """
 
         params = {}
@@ -69,10 +67,10 @@ class FormEntryCRUD(AppCRUD):
                 mat_code=row.mat_code,
                 qty=row.qty,
                 whse_no=row.whse_no,
-                status=row.status,
-                is_deleted=row.is_deleted,
-                is_cleared=row.is_cleared,
-                is_computed=row.is_computed,
+                status=row.status
+                # is_deleted=row.is_deleted,
+                # is_cleared=row.is_cleared,
+                # is_computed=row.is_computed,
             )
             for row in rows
         ]
