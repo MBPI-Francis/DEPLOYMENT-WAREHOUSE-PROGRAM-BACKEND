@@ -1,7 +1,14 @@
+from io import BytesIO
+
+import pandas as pd
+
 from backend.api_reports.v1.main import AppService
 from backend.api_reports.v1.crud import FormEntryCRUD
 from typing import List, Optional
 from backend.api_reports.v1.schemas import FormEntryResponse
+import os
+from pathlib import Path
+from datetime import datetime
 
 
 class FormEntryService(AppService):
@@ -26,3 +33,40 @@ class FormEntryService(AppService):
         )
 
         return form_entries
+
+
+    def export_form_entries_to_excel_file(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        mat_code: Optional[str] = None,
+        document_type: Optional[str] = None,
+        location: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> str:
+        # Create desktop export folder
+        desktop_path = Path.home() / "Desktop"
+        export_folder = desktop_path / "Warehouse Reports"
+        export_folder.mkdir(parents=True, exist_ok=True)
+
+        # File path with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = export_folder / f"form_entries_{timestamp}.xlsx"
+
+        # Get data
+        form_entries = self.get_form_entries(
+            date_from=date_from,
+            date_to=date_to,
+            mat_code=mat_code,
+            document_type=document_type,
+            location=location,
+            status=status,
+        )
+        data = [entry.dict() for entry in form_entries]
+        df = pd.DataFrame(data)
+
+        # Export to Excel file
+        with pd.ExcelWriter(file_path, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="FormEntries")
+
+        return str(file_path)

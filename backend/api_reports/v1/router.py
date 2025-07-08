@@ -28,3 +28,24 @@ def get_form_entries(
     )
 
     return result
+
+@router.get("/form-entries/export-to-file/")
+def export_form_entries_to_file(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    mat_code: Optional[str] = Query(None),
+    document_type: Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    file_path = FormEntryService(db).export_form_entries_to_excel_file(
+        date_from=date_from,
+        date_to=date_to,
+        mat_code=mat_code,
+        document_type=document_type,
+        location=location,
+        status=status,
+    )
+
+    return {"message": "Exported successfully", "file_path": file_path}
