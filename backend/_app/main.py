@@ -17,7 +17,9 @@ from backend.api_others import router as create_view_router
 from backend.settings.database import engine, Base
 from backend.settings.create_view_table import (create_ending_view_table,
                                                 create_beginning_view_table,
-                                                create_adjusted_ending_view_table)
+                                                create_adjusted_ending_view_table,
+                                                create_view_form_entries_log_table)
+
 from backend.settings.create_product_kind import create_product_kind
 from backend.api_adjustment_form.v1_spillage import router as adjustment_form_router
 from backend.api_adjustment_form.v1_form_entries import router as adjustment_form_form_entries_router
@@ -37,6 +39,7 @@ def startup_event():
     create_ending_view_table()
     create_product_kind()
     create_adjusted_ending_view_table()
+    create_view_form_entries_log_table()
     start_scheduler()
     print("[INFO] Scheduler started")
 
