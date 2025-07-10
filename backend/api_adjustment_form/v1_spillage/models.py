@@ -35,6 +35,7 @@ class SpillageAdjustmentForm(Base):
     deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
     date_computed = Column(Date, nullable=True)
     is_cleared = Column(Boolean, default=False)
+    reason = Column(String(50), nullable=False)
 
 
     # Relationships for created_by, updated_by, and deleted_by

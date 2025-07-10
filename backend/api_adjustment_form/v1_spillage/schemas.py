@@ -19,6 +19,8 @@ class SpillageAdjustmentForm(BaseModel):
     spillage_form_number: str = Field(max_length=50)
     incident_date: date
     responsible_person: str = Field(max_length=50)
+    reason: str = Field(max_length=50)
+
 
 
 class AdjustmentFormCreate(SpillageAdjustmentForm):
@@ -45,6 +47,7 @@ class AdjustmentFormResponse(BaseModel):
     created_by: Optional[UUID] = None
     updated_by: Optional[UUID] = None
     date_computed: Optional[date] = None
+    reason: Optional[str] = None
 
     class Config:
         from_attributes = True

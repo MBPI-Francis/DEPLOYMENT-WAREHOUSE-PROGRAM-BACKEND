@@ -768,7 +768,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
                     CASE
                         WHEN eb.status::text = 'held : reject'::text 
                         THEN 
-                        - COALESCE(
+                        + COALESCE(
                             CASE
                                 WHEN spillage.status::text = 'held : reject'::text THEN spillage.total_spillage_quantity
                                 ELSE NULL::numeric
@@ -891,7 +891,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         WHEN eb.status::text = 'held : contaminated'::text 
                         THEN 
-                        - COALESCE(
+                        + COALESCE(
                             CASE
                                 WHEN spillage.status::text = 'held : contaminated'::text THEN spillage.total_spillage_quantity
                                 ELSE NULL::numeric
@@ -1013,7 +1013,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
         
                         WHEN eb.status::text = 'held : under evaluation'::text 
                         THEN 
-                        - COALESCE(
+                        + COALESCE(
                             CASE
                                 WHEN spillage.status::text = 'held : under evaluation'::text THEN spillage.total_spillage_quantity
                                 ELSE NULL::numeric
@@ -1135,7 +1135,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
                             
                         WHEN eb.status::text = 'good'::text 
                         THEN 
-                        - COALESCE(
+                        + COALESCE(
                             CASE
                                 WHEN spillage.status::text = 'good'::text THEN spillage.total_spillage_quantity
                                 ELSE NULL::numeric

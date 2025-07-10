@@ -20,17 +20,18 @@ class AdjustmentFormCRUD(AppCRUD):
     def create_adjustment_form(self, adjustment_form: AdjustmentFormCreate):
 
         adjustment_form_item = SpillageAdjustmentForm(
-                                            rm_code_id=adjustment_form.rm_code_id,
-                                            warehouse_id=adjustment_form.warehouse_id,
-                                            ref_number=adjustment_form.ref_number,
-                                            reference_date=adjustment_form.reference_date,
-                                            adjustment_date=adjustment_form.adjustment_date,
-                                            qty_kg=adjustment_form.qty_kg,
-                                            status_id = adjustment_form.status_id,
-                                            incident_date=adjustment_form.incident_date,
-                                            spillage_form_number=adjustment_form.spillage_form_number,
-                                            responsible_person=adjustment_form.responsible_person,
-                                            )
+            rm_code_id=adjustment_form.rm_code_id,
+            warehouse_id=adjustment_form.warehouse_id,
+            ref_number=adjustment_form.ref_number,
+            reference_date=adjustment_form.reference_date,
+            adjustment_date=adjustment_form.adjustment_date,
+            qty_kg=adjustment_form.qty_kg,
+            status_id = adjustment_form.status_id,
+            incident_date=adjustment_form.incident_date,
+            spillage_form_number=adjustment_form.spillage_form_number,
+            responsible_person=adjustment_form.responsible_person,
+            reason=adjustment_form.reason
+        )
 
 
         self.db.add(adjustment_form_item)
@@ -59,7 +60,8 @@ class AdjustmentFormCRUD(AppCRUD):
                 SpillageAdjustmentForm.incident_date,
                 SpillageAdjustmentForm.created_at,
                 SpillageAdjustmentForm.updated_at,
-                SpillageAdjustmentForm.date_computed
+                SpillageAdjustmentForm.date_computed,
+                SpillageAdjustmentForm.reason
 
             )
 
@@ -104,7 +106,8 @@ class AdjustmentFormCRUD(AppCRUD):
                 SpillageAdjustmentForm.incident_date,
                 SpillageAdjustmentForm.created_at,
                 SpillageAdjustmentForm.updated_at,
-                SpillageAdjustmentForm.date_computed
+                SpillageAdjustmentForm.date_computed,
+                SpillageAdjustmentForm.reason
 
             )
 
@@ -140,7 +143,8 @@ class AdjustmentFormCRUD(AppCRUD):
                 SpillageAdjustmentForm.incident_date,
                 SpillageAdjustmentForm.created_at,
                 SpillageAdjustmentForm.updated_at,
-                SpillageAdjustmentForm.date_computed
+                SpillageAdjustmentForm.date_computed,
+                SpillageAdjustmentForm.reason
 
             )
 
