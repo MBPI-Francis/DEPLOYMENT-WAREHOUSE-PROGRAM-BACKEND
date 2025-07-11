@@ -398,8 +398,8 @@ async def check_stock_value(rm_id: UUID,
 
         result = db.execute(new_beginning_query)
         beginning_balance = result.fetchone()
-        # Check if there is a record after executing the query
 
+        # Check if there is a record after executing the query
 
         if beginning_balance:
 
@@ -407,8 +407,7 @@ async def check_stock_value(rm_id: UUID,
             #  Returns true if the entered quantity is less or equal
             # Returns false if the entered quantity exceeds
 
-            ending_result =  float(beginning_balance[0]) - entered_qty
-            print(float(ending_result))
+            ending_result =  float(beginning_balance[0]) + entered_qty
             if ending_result < 0:
                 return False
 
