@@ -1,1 +1,4 @@
 /setup_files/
+venv/Scripts/uvicorn.exe
+venv/Scripts/python.exe
+venv/Scripts/uvicorn.exe
