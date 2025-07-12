@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query
 from sqlalchemy.orm import Session
 from backend.api_stock_on_hand.v1.schemas import (StockOnHandCreate,
                                                   StockOnHandUpdate,
@@ -10,7 +10,7 @@ from backend.api_stock_on_hand.v1.service import StockOnHandService
 from backend.settings.database import get_db
 from uuid import UUID
 from fastapi.responses import JSONResponse
-from typing import List
+from typing import List, Optional
 
 router = APIRouter(prefix="/api/rm_stock_on_hand/v1")
 
@@ -39,9 +39,20 @@ async def read_rm_soh(db: get_db = Depends()):
 # What is this about? Still identifying what is it for
 @router.get("/list/historical/", response_model=List[HistoricalStockOnHandResponse])
 async def get_rm_soh(
-        date_computed: str = None,
-        db: get_db = Depends()):
-    result = StockOnHandService(db).get_historical_stock_on_hand(date_computed)
+    date_from: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    date_to: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    mat_code: Optional[str] = Query(None, description="Raw Material Code (or 'all')"),
+    location: Optional[str] = Query(None, description="Warehouse Location (or 'all')"),
+    status: Optional[str] = Query(None, description="Raw Material Status (or 'all')"),
+    db: Session = Depends(get_db)
+):
+    result = StockOnHandService(db).get_historical_stock_on_hand(
+        date_from=date_from,
+        date_to=date_to,
+        mat_code=mat_code,
+        location=location,
+        status=status
+    )
     return result
 
 

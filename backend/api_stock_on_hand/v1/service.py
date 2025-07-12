@@ -1,3 +1,5 @@
+from typing import Optional, List
+
 from sqlalchemy.exc import IntegrityError
 from backend.api_raw_materials.v1.schemas import RawMaterialCreate
 from backend.api_raw_materials.v1.crud import RawMaterialCRUD
@@ -7,7 +9,7 @@ from backend.api_stock_on_hand.v1.exceptions import (StockOnHandCreateException,
                                                      StockOnHandNotFoundException,
                                                      )
 from backend.api_stock_on_hand.v1.main import AppService
-from backend.api_stock_on_hand.v1.schemas import StockOnHandCreate, StockOnHandUpdate
+from backend.api_stock_on_hand.v1.schemas import StockOnHandCreate, StockOnHandUpdate, HistoricalStockOnHandResponse
 from uuid import UUID
 import io
 import pandas as pd
@@ -39,13 +41,28 @@ class StockOnHandService(AppService):
         return rm_soh_item
 
     # Still not sure what is this about
-    def get_historical_stock_on_hand(self, date_computed):
+    def get_historical_stock_on_hand(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        mat_code: Optional[str] = None,
+        location: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[HistoricalStockOnHandResponse]:
         try:
-            rm_soh_item = StockOnHandCRUD(self.db).get_historical_stock_on_hand(date_computed)
-
+            rm_soh_items = StockOnHandCRUD(self.db).get_historical_stock_on_hand(
+                date_from=date_from,
+                date_to=date_to,
+                mat_code=mat_code,
+                location=location,
+                status=status
+            )
         except Exception as e:
-            raise StockOnHandNotFoundException(detail=f"Error: {str(e)}")
-        return rm_soh_item
+            raise Exception(f"Error retrieving historical SOH: {str(e)}")
+        return rm_soh_items
+
+    # The export_historical_soh_to_excel_file method is REMOVED from here.
+    # Its logic will be moved to the frontend.
 
 
 

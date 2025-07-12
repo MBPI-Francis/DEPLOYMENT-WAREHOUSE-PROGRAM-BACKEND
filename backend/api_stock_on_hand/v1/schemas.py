@@ -38,18 +38,35 @@ class StockOnHandResponse(StockOnHandBase):
         from_attributes = True
 
 
+# class HistoricalStockOnHandResponse(BaseModel):
+#     wh_id: UUID
+#     wh_name: str
+#     wh_number: int
+#     rm_id: UUID
+#     rm_code: str
+#     qty: float
+#     stock_change_date: datetime
+#     status_name: str
+#     status_id: UUID
+#     date_computed: date
+#
+#     class Config:
+#         from_attributes = True
+
 class HistoricalStockOnHandResponse(BaseModel):
     wh_id: UUID
     wh_name: str
-    wh_number: int
+    wh_number: Optional[int] # Assuming wh_number might be optional/nullable
     rm_id: UUID
     rm_code: str
     qty: float
-    stock_change_date: datetime
-    status_name: str
-    status_id: UUID
-    date_computed: date
+    stock_change_date: Optional[datetime] # Assuming this might be optional/nullable
+    status_name: Optional[str] # Assuming status_name might be optional/nullable (from outerjoin)
+    status_id: Optional[UUID] # Assuming status_id might be optional/nullable (from outerjoin)
+    date_computed: datetime
 
     class Config:
+        # For Pydantic v2+, use 'from_attributes = True'
+        # For Pydantic v1, use 'orm_mode = True'
         from_attributes = True
 
