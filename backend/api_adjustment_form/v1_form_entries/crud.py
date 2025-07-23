@@ -275,9 +275,9 @@ class AdjustmentFormCRUD(AppCRUD):
                 # Create a new StockOnHand record
                 new_stock = StockOnHand(
                     rm_code_id=adjustment_form.rm_code_id,
-                    warehouse_id=adjustment_form.warehouse_id,
+                    warehouse_id=adjustment_form.to_warehouse_id,
                     rm_soh=0.00,
-                    status_id=adjustment_form.to_warehouse_id,
+                    status_id=adjustment_form.status_id,
                     date_computed=date_computed,
                     stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
                 )
