@@ -285,7 +285,7 @@ class AdjustmentFormCRUD(AppCRUD):
                 self.db.commit()
                 self.db.refresh(new_stock)
 
-            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
+            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_transfer_id
             existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
                 AdjustmentFormCorrect.incorrect_transfer_id == adjustment_form.incorrect_transfer_id,
                 AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
