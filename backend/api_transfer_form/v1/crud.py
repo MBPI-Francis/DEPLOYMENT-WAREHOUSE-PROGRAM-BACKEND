@@ -1,3 +1,5 @@
+from typing import Optional
+
 from backend.api_transfer_form.v1.exceptions import (TempTransferFormNotFoundException,
                                                      TempTransferFormUpdateException,
                                                      TempTransferFormSoftDeleteException,
@@ -11,7 +13,7 @@ from backend.api_warehouses.v1.models import Warehouse
 from backend.api_stock_on_hand.v1.models import StockOnHand
 from backend.api_status.v1.models import Status
 from uuid import UUID
-from sqlalchemy import text, desc
+from sqlalchemy import text, desc, and_
 from sqlalchemy import or_
 from sqlalchemy.orm import aliased
 
@@ -167,8 +169,16 @@ class TempTransferFormCRUD(AppCRUD):
         return stmt.all()
 
 
-    def get_historical_transfer_form(self, record_id):
-
+    def get_historical_transfer_form(
+        self,
+        record_id: Optional[UUID] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        rm_code: Optional[str] = None,
+        from_warehouse_name: Optional[str] = None, # New filter parameter
+        to_warehouse_name: Optional[str] = None,   # New filter parameter
+        status_name: Optional[str] = None,         # New filter parameter
+    ):
         # Create aliases for the Warehouse model
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
@@ -185,39 +195,58 @@ class TempTransferFormCRUD(AppCRUD):
                 FromWarehouse.wh_name.label("from_warehouse"),
                 ToWarehouse.wh_name.label("to_warehouse"),
                 TempTransferForm.transfer_date,
-                Status.name.label("status"),
+                Status.name.label("status"), # This is the status name
                 TempTransferForm.created_at,
                 TempTransferForm.updated_at,
                 TempTransferForm.date_computed,
                 TempTransferForm.is_adjusted
             )
-
-            .outerjoin(Status, Status.id == TempTransferForm.status_id)  # Left join Status with TransferForm
-            .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)  # Join StockOnHand with RawMaterial
-            .join(FromWarehouse,
-                  TempTransferForm.from_warehouse_id == FromWarehouse.id)  # Join TempTransferForm with Warehouse
-            .join(ToWarehouse,
-                  TempTransferForm.to_warehouse_id == ToWarehouse.id)  # Join TempTransferForm with Warehouse
+            .outerjoin(Status, Status.id == TempTransferForm.status_id)
+            .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)
+            .join(FromWarehouse, TempTransferForm.from_warehouse_id == FromWarehouse.id)
+            .join(ToWarehouse, TempTransferForm.to_warehouse_id == ToWarehouse.id)
             .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                #     TempTransferForm.is_cleared == True,  # False check for is_cleared
-                    TempTransferForm.date_computed.is_not(None)
-                ,
+                TempTransferForm.date_computed.is_not(None), # Keep existing filters
                 or_(
-                    TempTransferForm.is_deleted.is_(None),  # NULL check for is_deleted
-                    TempTransferForm.is_deleted == False  # False check for is_deleted
+                    TempTransferForm.is_deleted.is_(None),
+                    TempTransferForm.is_deleted == False
                 )
             )
         )
 
-        if stmt:
-            if record_id:
-                stmt = stmt.filter(TempTransferForm.id == record_id)
+        # Apply record_id filter if provided
+        if record_id:
+            stmt = stmt.filter(TempTransferForm.id == record_id)
 
-            return stmt.all()
-        else:
-            return []
+        # Apply new filters
+        if date_from and date_to:
+            # Assuming transfer_date is a DATE or DATETIME type in your database
+            # and date_from/date_to are in 'YYYY-MM-DD' format
+            stmt = stmt.filter(
+                and_(
+                    TempTransferForm.transfer_date >= date_from,
+                    TempTransferForm.transfer_date <= date_to
+                )
+            )
+        elif date_from: # If only date_from is provided
+            stmt = stmt.filter(TempTransferForm.transfer_date >= date_from)
+        elif date_to: # If only date_to is provided
+            stmt = stmt.filter(TempTransferForm.transfer_date <= date_to)
 
+        if rm_code and rm_code.lower() != "all":
+            stmt = stmt.filter(RawMaterial.rm_code == rm_code)
+
+        if from_warehouse_name and from_warehouse_name.lower() != "all":
+            stmt = stmt.filter(FromWarehouse.wh_name == from_warehouse_name)
+
+        if to_warehouse_name and to_warehouse_name.lower() != "all":
+            stmt = stmt.filter(ToWarehouse.wh_name == to_warehouse_name)
+
+        if status_name and status_name.lower() != "all":
+            stmt = stmt.filter(Status.name == status_name)
+
+        # Execute query and return results
+        return stmt.all()
 
     def update_transfer_form(self, transfer_form_id: UUID, transfer_form_update: TempTransferFormUpdate):
         try:
