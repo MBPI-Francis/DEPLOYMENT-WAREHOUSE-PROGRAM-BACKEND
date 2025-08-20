@@ -17,8 +17,8 @@ BACKUP_FOLDER = r"\\system-server\IT\Francis-Program-Projects\DB BACKUPS\WAREHOU
 # Uncomment this if you want to use the RMManagementSystemDB Database in your own computer/laptop. This is the database for development
 # DATABASE_URL = "postgresql://postgres:331212@localhost:5432/RMManagementSystemDB"
 
-# This url is for sir Elton. You can uncomment  (With Password)
-DATABASE_URL = "postgresql://postgres:newpassword@localhost:5432/RMManagementSystemDB"
+# This url is for sir Elton. You can uncomment  (With Password) (LOCAL DEVELOPMENT IN MBPI - WORK)
+DATABASE_URL = "postgresql://postgres:newpassword@localhost:5433/RMManagementSystemDB"
 
 # This url is for sir Elton. You can uncomment this (Without Password)
 # DATABASE_URL = "postgresql://postgres@localhost:5432/RMManagementSystemDB"
