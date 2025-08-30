@@ -488,7 +488,7 @@ CREATE OR REPLACE VIEW public.view_form_entries_log
     is_cleared,
     is_computed
    FROM form_entries_log
-  WHERE date_reported >= '2025-07-01'::date AND (date_computed IS NOT NULL AND is_deleted = false AND is_cleared = true OR is_deleted = true)
+   WHERE date_computed IS NOT NULL AND is_deleted = false
   ORDER BY date_computed DESC, date_encoded DESC, document_type, mat_code, qty;
 
 ALTER TABLE public.view_form_entries_log
