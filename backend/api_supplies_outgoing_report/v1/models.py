@@ -9,7 +9,7 @@ from backend.api_users.v1.models import User
 
 # Parent Model: Department
 class SuppliesOutgoingReport(Base):
-    __tablename__ = "tbl_supplies_supplies_outgoing_reports"
+    __tablename__ = "tbl_supplies_outgoing_reports"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     rm_code_id = Column(UUID(as_uuid=True), ForeignKey("tbl_raw_materials.id"), nullable=False)

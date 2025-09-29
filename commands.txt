@@ -6,3 +6,30 @@ uvicorn backend._app.main:app --reload
 
 #-- Command to run the api in your LAN Server (MBPI System-Server) --#
 uvicorn backend._app.main:app --host 0.0.0.0 --port 8000
+
+
+#---- THIS IS FOR THE ALEMBIC ----#
+
+#Initialize after installing it
+alembic init alembic
+
+# For Making Migration File. Equivalent to makemigrations command in DJANGO
+alembic revision --autogenerate -m "you message"
+
+# For Migrating all the tables. It uses the migration file to create new tables or changing your databse structure
+alembic upgrade head
+
+# if upgrading the database
+alembic upgrade <unique number of the migration first 4 letters>
+
+# revision downgrade (go down)
+alembic downgrade -1
+
+
+DROP TYPE categoryenum;
+DROP TYPE statusenum;
+
+# check for type of Enum
+SELECT unnest(enum_range(NULL::department));
+
+#---- END IF ALEMBIC COMMANDS ----#
