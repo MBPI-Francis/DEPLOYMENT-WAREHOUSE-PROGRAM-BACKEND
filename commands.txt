@@ -1,0 +1,8 @@
+
+
+
+#-- Command to run the api in your local computer --#
+uvicorn backend._app.main:app --reload
+
+#-- Command to run the api in your LAN Server (MBPI System-Server) --#
+uvicorn backend._app.main:app --host 0.0.0.0 --port 8000

@@ -23,6 +23,7 @@ from backend.settings.create_view_table import (create_ending_view_table,
 from backend.settings.create_product_kind import create_product_kind
 from backend.api_adjustment_form.v1_spillage import router as adjustment_form_router
 from backend.api_adjustment_form.v1_form_entries import router as adjustment_form_form_entries_router
+from backend.api_supplies_outgoing_report.v1 import router as supplies_outgoing_form_router
 from backend.api_reports.v1 import router as reports_router
 
 
@@ -74,6 +75,9 @@ app.include_router(temp_receiving_report_router.router)
 
 # These code includes all the routers/endpoint of the api_outgoing_report
 app.include_router(temp_outgoing_report_router.router)
+
+# These code includes all the routers/endpoint of the api_supplies_outgoing_report
+app.include_router(supplies_outgoing_form_router.router)
 
 # These code includes all the routers/endpoint of the api_transfer_form
 app.include_router(temp_transfer_form_router.router)
