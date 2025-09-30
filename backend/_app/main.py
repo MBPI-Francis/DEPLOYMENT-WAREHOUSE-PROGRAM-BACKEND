@@ -30,6 +30,8 @@ from backend.api_reports.v1 import router as reports_router
 from backend._app.create_tables import CreateDatabaseTables
 
 
+from backend.api_outgoing_report.v2 import router as v2_outgoing_report_router
+
 
 
 
@@ -82,6 +84,8 @@ app.include_router(temp_receiving_report_router.router)
 # These code includes all the routers/endpoint of the api_outgoing_report
 app.include_router(temp_outgoing_report_router.router)
 
+
+
 # These code includes all the routers/endpoint of the api_transfer_form
 app.include_router(temp_transfer_form_router.router)
 
@@ -106,6 +110,10 @@ app.include_router(reports_router.router)
 
 # These code includes all the routers/endpoint of the api_supplies_outgoing_report
 app.include_router(supplies_outgoing_form_router.router)
+
+
+# These code includes all the routers/endpoint of the api_outgoing_report version 2
+app.include_router(v2_outgoing_report_router.router)
 
 
 

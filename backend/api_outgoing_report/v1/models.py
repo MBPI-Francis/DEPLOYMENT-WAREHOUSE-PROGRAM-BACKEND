@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Date, Numeric
+from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Date, Numeric, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -19,6 +19,7 @@ class TempOutgoingReport(Base):
     ref_number = Column(String(50), nullable=False, unique=False)
     outgoing_date = Column(Date,nullable=False)
     qty_kg = Column(Numeric(10, 2), nullable=False)
+    outgoing_type = Column(Enum("RM", "SUPPLY", name="outgoing_type_enum"), nullable=True, unique=False)
     is_deleted = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

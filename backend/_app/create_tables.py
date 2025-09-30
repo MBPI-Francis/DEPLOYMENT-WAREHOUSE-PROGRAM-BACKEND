@@ -18,7 +18,9 @@ class CreateDatabaseTables:
         from backend.api_receiving_report.v1.models import TempReceivingReport
         from backend.api_status.v1.models import Status
         from backend.api_stock_on_hand.v1.models import StockOnHand
-        from backend.api_supplies_outgoing_report.v1.models import SuppliesOutgoingReport
+
+        # Commented out, it will be created in the future
+        # from backend.api_supplies_outgoing_report.v1.models import SuppliesOutgoingReport
         from backend.api_transfer_form.v1.models import TempTransferForm
         from backend.api_users.v1.models import User
         from backend.api_warehouses.v1.models import Warehouse

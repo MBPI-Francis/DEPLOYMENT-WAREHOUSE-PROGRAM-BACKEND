@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, SmallInteger
+from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, SmallInteger, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -14,6 +14,7 @@ class RawMaterial(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
     rm_code = Column(String(50), nullable=False, unique=True)
     rm_name = Column(String(150), nullable=True)
+    type = Column(Enum("RM", "SUPPLY", name="rm_type_enum"), nullable=True, unique=False)
     description = Column(String(300), nullable=True)
     is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
