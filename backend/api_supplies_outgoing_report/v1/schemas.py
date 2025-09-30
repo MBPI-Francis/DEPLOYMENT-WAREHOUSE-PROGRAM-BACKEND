@@ -9,7 +9,7 @@ from datetime import date, datetime
 class SuppliesOutgoingForm(BaseModel):
     rm_code_id: UUID
     warehouse_id: UUID
-    ref_number: str = Field(max_length=50, description="The reference number of the Outgoing Report")
+    ref_number: str = Field(max_length=50, description="The reference number of the Supplies Outgoing Report")
     outgoing_date: date
     qty_kg: float
     status_id: UUID

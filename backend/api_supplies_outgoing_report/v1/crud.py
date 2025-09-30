@@ -4,9 +4,9 @@ from backend.api_supplies_outgoing_report.v1.exceptions import (SuppliesOutgoing
                                                        SuppliesOutgoingReportRestoreException
                                                        )
 from backend.api_status.v1.models import Status
-from backend.api_outgoing_report.v1.main import AppCRUD
+from backend.api_supplies_outgoing_report.v1.main import AppCRUD
 from backend.api_supplies_outgoing_report.v1.models import SuppliesOutgoingReport
-from backend.api_outgoing_report.v1.schemas import OutgoingFormCreate, OutgoingFormUpdate
+from backend.api_supplies_outgoing_report.v1.schemas import SuppliesOutgoingFormCreate, SuppliesOutgoingFormUpdate
 from uuid import UUID
 from backend.api_raw_materials.v1.models import RawMaterial
 from backend.api_warehouses.v1.models import Warehouse
@@ -17,7 +17,7 @@ from sqlalchemy import or_, desc
 class SuppliesOutgoingReportCRUD(AppCRUD):
 
 
-    def create_outgoing_report(self, outgoing_report: OutgoingFormCreate):
+    def create_outgoing_report(self, outgoing_report: SuppliesOutgoingFormCreate):
 
         outgoing_report_item = SuppliesOutgoingReport(rm_code_id=outgoing_report.rm_code_id,
                                             warehouse_id=outgoing_report.warehouse_id,
@@ -149,7 +149,7 @@ class SuppliesOutgoingReportCRUD(AppCRUD):
         else:
             return []
 
-    def update_outgoing_report(self, outgoing_report_id: UUID, outgoing_report_update: OutgoingFormUpdate):
+    def update_outgoing_report(self, outgoing_report_id: UUID, outgoing_report_update: SuppliesOutgoingFormUpdate):
         try:
             outgoing_report = self.db.query(SuppliesOutgoingReport).filter(SuppliesOutgoingReport.id == outgoing_report_id).first()
             if not outgoing_report or outgoing_report.is_deleted:

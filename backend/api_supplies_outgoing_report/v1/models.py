@@ -7,7 +7,7 @@ from backend.settings.database import Base  # Assuming Base is imported from you
 from backend.api_users.v1.models import User
 
 
-# Parent Model: Department
+
 class SuppliesOutgoingReport(Base):
     __tablename__ = "tbl_supplies_outgoing_reports"
 
