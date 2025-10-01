@@ -14,6 +14,7 @@ class OutgoingForm(BaseModel):
     qty_kg: float
     status_id: UUID
     outgoing_type: str
+    outgoing_destination: Optional[str] = None
 
 class OutgoingFormCreate(OutgoingForm):
     created_by_id: Optional[UUID] = None
@@ -37,6 +38,7 @@ class OutgoingFormResponse(BaseModel):
     date_computed: Optional[date] = None
     is_adjusted: Optional[bool] = None
     outgoing_type: str
+    outgoing_destination: Optional[str] = None
 
     class Config:
         from_attributes = True

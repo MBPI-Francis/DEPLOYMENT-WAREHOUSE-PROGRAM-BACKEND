@@ -25,7 +25,8 @@ class TempOutgoingReportCRUD(AppCRUD):
                                             outgoing_date=outgoing_report.outgoing_date,
                                             qty_kg=outgoing_report.qty_kg,
                                             status_id = outgoing_report.status_id,
-                                            outgoing_type = outgoing_report.outgoing_type
+                                            outgoing_type = outgoing_report.outgoing_type,
+                                            outgoing_destination = outgoing_report.outgoing_destination
                                             )
 
 
@@ -49,6 +50,7 @@ class TempOutgoingReportCRUD(AppCRUD):
                 Warehouse.wh_name,
                 Status.name.label("status"),
                 TempOutgoingReport.outgoing_type,
+                TempOutgoingReport.outgoing_destination,
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
                 TempOutgoingReport.updated_at,
@@ -91,7 +93,7 @@ class TempOutgoingReportCRUD(AppCRUD):
                 Warehouse.wh_name,
                 Status.name.label("status"),
                 TempOutgoingReport.outgoing_type,
-                TempOutgoingReport.outgoing_type,
+                TempOutgoingReport.outgoing_destination,
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
                 TempOutgoingReport.updated_at,
@@ -125,6 +127,7 @@ class TempOutgoingReportCRUD(AppCRUD):
                 Warehouse.wh_name,
                 Status.name.label("status"),
                 TempOutgoingReport.outgoing_type,
+                TempOutgoingReport.outgoing_destination,
                 TempOutgoingReport.outgoing_date,
                 TempOutgoingReport.created_at,
                 TempOutgoingReport.updated_at,

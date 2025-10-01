@@ -20,6 +20,7 @@ class TempOutgoingReport(Base):
     outgoing_date = Column(Date,nullable=False)
     qty_kg = Column(Numeric(10, 2), nullable=False)
     outgoing_type = Column(Enum("RM", "SUPPLY", name="outgoing_type_enum"), nullable=True, unique=False)
+    outgoing_destination = Column(String(20), nullable=True)
     is_deleted = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

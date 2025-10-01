@@ -26,7 +26,7 @@ class FormEntryCRUD(AppCRUD):
                 status
             FROM view_form_entries_log
             WHERE 1 = 1 AND is_deleted = FALSE
-            
+
         """
 
         params = {}
@@ -41,9 +41,14 @@ class FormEntryCRUD(AppCRUD):
             params["mat_code"] = mat_code
 
         if document_type and document_type.lower() != "all" and document_type.strip() != "":
-            query += " AND document_type = :document_type"
-            params["document_type"] = document_type
+            query += " AND document_type LIKE :document_type"
+            if document_type == "adjustment_form_entries":
 
+                params["document_type"] = "adjustment_form_%correct"
+            else:
+                params["document_type"] = document_type
+
+            print(document_type)
         if location and location.lower() != "all" and location.strip() != "":
             query += " AND whse_no = :whse_no"
             params["whse_no"] = location
