@@ -503,7 +503,9 @@ CREATE OR REPLACE VIEW public.view_form_entries_log
              LEFT JOIN tbl_status s_new ON tac.new_status_id = s_new.id
              JOIN tbl_adjustment_parent parent ON tac.adjustment_parent_id = parent.id
         )
- SELECT date_encoded,
+ SELECT 
+    ROW_NUMBER() OVER (ORDER BY date_computed DESC, date_encoded DESC, document_type, document_number, mat_code, qty) AS entry_id,
+    date_encoded,
     date_reported,
     document_type,
     document_number,
