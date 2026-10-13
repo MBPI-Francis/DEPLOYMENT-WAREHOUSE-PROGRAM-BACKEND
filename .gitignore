@@ -1,8 +1,8 @@
 /setup_files/
 /venv
-backend/settings/database.py
-backend/settings/database.py
-backend/settings/database.py
+api_rm_inv/settings/database.py
+api_rm_inv/settings/database.py
+api_rm_inv/settings/database.py
 Thunderbird_profile_backup.zip
-backend/settings/database.py
-backend/settings/database.py
+api_rm_inv/settings/database.py
+api_rm_inv/settings/database.py
