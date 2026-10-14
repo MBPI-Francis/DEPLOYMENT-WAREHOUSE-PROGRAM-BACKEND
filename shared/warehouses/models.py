@@ -1,45 +1,33 @@
+"""
+Shared Warehouse Entity Model.
+
+Master lookup for storage locations, facility codes, and silos across all modules.
+Mapped directly to schema_whrm.tbl_warehouses.
+"""
+
 import uuid
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, SmallInteger
+from sqlalchemy import Column, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-from api_rm_inv.settings.database import Base  # Assuming Base is imported from your database setup
-from api_rm_inv.api_users.v1.models import User
+from core.database import Base
 
 
-# Parent Model: Department
 class Warehouse(Base):
     """
-    Database model for physical plant warehouses.
+    Database entity for physical warehouse storage locations.
 
     Attributes:
         id: Primary key UUID identifying the warehouse.
-        wh_name: Readable name of the warehouse (e.g., 'Main Warehouse', 'Silo A').
-        wh_number: Facility code or tracking number assigned to the warehouse.
-        is_active: Status flag indicating if the location can actively receive stock.
+        wh_name: Readable name of the facility (e.g., 'Main Warehouse', 'Silo A').
+        wh_number: Facility code or tracking number (e.g., '1', '2', 'WH-01').
     """
-
     __tablename__ = "tbl_warehouses"
+    __table_args__ = {"schema": "schema_whrm", "extend_existing": True}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
-    wh_number = Column(SmallInteger, nullable=False, unique=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True
+    )
     wh_name = Column(String(150), nullable=False, unique=True)
-    description = Column(String(300), nullable=True)
-    is_deleted = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=True)
-    created_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    updated_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-
-
-
-    # Relationships for created_by, updated_by, and deleted_by
-    created_by = relationship("User", foreign_keys=[created_by_id], backref="created_warehouses")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], backref="updated_warehouses")
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id], backref="deleted_warehouses")
-
-
-
-
+    wh_number = Column(String(50), nullable=True)

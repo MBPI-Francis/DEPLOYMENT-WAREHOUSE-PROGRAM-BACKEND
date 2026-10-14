@@ -26,6 +26,7 @@ from api_rm_inv.api_adjustment_form.v1_spillage import router as adjustment_spil
 from api_rm_inv.api_adjustment_form.v1_form_entries import router as adjustment_form_entries_router
 from api_rm_inv.api_reports.v1 import router as reports_router
 from api_rm_inv.api_supplies_outgoing_report.v1 import router as supplies_outgoing_router
+from api_rm_inv.api_preparation_form.v1.router import router as prep_forms_router
 
 # All endpoints in this router can optionally be prefixed with /rm or kept as-is
 rm_router = APIRouter()
@@ -38,12 +39,19 @@ rm_router.include_router(status_router.router)
 rm_router.include_router(soh_router.router)
 rm_router.include_router(product_kind_router.router)
 rm_router.include_router(notes_router_temp.router)
+
 rm_router.include_router(auth_router.router)
 rm_router.include_router(receiving_report_router.router)
 rm_router.include_router(outgoing_report_router.router)
 rm_router.include_router(v2_outgoing_report_router.router)
 rm_router.include_router(transfer_form_router.router)
-rm_router.include_router(preparation_form_router.router)
+
+# 1. New standardized prefix (for PyQt6)
+rm_router.include_router(prep_forms_router)
+
+# 2. Legacy prefix (for older programs expecting /api/preparation_forms/v1/...)
+# rm_router.include_router(prep_forms_router, prefix="/api/preparation_forms/v1", tags=["Preparation Forms (Legacy Alias)"])
+
 rm_router.include_router(held_form_router.router)
 rm_router.include_router(create_view_router.router)
 rm_router.include_router(adjustment_spillage_router.router)

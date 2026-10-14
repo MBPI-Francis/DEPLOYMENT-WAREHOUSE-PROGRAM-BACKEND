@@ -1,206 +1,246 @@
-# backend/api_preparation_form/v1/crud.py
+"""
+Data Access Layer (CRUD) for Preparation Form Module.
 
-from api_rm_inv.api_preparation_form.v1.exceptions import (TempPreparationFormNotFoundException,
-                                                           TempPreparationFormUpdateException,
-                                                           TempPreparationFormSoftDeleteException,
-                                                           TempPreparationFormRestoreException
-                                                           )
-from api_rm_inv.api_preparation_form.v1.main import AppCRUD
-from api_rm_inv.api_preparation_form.v1.models import TempPreparationForm
-from api_rm_inv.api_preparation_form.v1.schemas import TempPreparationFormCreate, TempPreparationFormUpdate
-from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_warehouses.v1.models import Warehouse
-from api_rm_inv.api_status.v1.models import Status
-from sqlalchemy import or_
+Contains direct SQLAlchemy database queries and writes across:
+- schema_whprep: Upstream recipe runs and details.
+- schema_whrm: Inventory deduction preparation entries and lookups.
+"""
+
+from typing import List, Optional
 from uuid import UUID
-from sqlalchemy import desc  # Import for descending order
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc, or_, String
+
+from core.base import BaseRepository
+from api_rm_inv.api_preparation_form.v1.models import (
+    PrepFormHeader,
+    PrepFormRun,
+    PrepFormDetail,
+    PrepStatus,
+    TempPreparationForm
+)
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from shared.users.models import User
 
 
-# These are the code for the app to communicate to the database
-class TempPreparationFormCRUD(AppCRUD):
+class PrepIntegrationCRUD(BaseRepository):
+    """Encapsulates all database operations for both integration and preparation management."""
 
-    def create_preparation_form(self, preparation_form: TempPreparationFormCreate):
+    # -----------------------------------------------------------------------
+    # 1. Traveler Integration Queries (schema_whprep)
+    # -----------------------------------------------------------------------
 
-        preparation_form_item = TempPreparationForm(rm_code_id=preparation_form.rm_code_id,
-                                                    warehouse_id=preparation_form.warehouse_id,
-                                                    ref_number=preparation_form.ref_number,
-                                                    preparation_date=preparation_form.preparation_date,
-                                                    qty_prepared=preparation_form.qty_prepared,
-                                                    qty_return=preparation_form.qty_return,
-                                                    status_id=preparation_form.status_id
-                                                    )
-
-        self.db.add(preparation_form_item)
-        self.db.commit()
-        self.db.refresh(preparation_form_item)
-        return preparation_form_item
-
-    def get_preparation_form(self):
-
-        """
-             Join StockOnHand, TempPreparationForm, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
-            self.db.query(
-                TempPreparationForm.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempPreparationForm.qty_prepared,
-                TempPreparationForm.qty_return,
-                TempPreparationForm.ref_number,
-                Warehouse.wh_name,
-                Status.name.label("status"),
-                TempPreparationForm.preparation_date,
-                TempPreparationForm.created_at,
-                TempPreparationForm.updated_at,
-                TempPreparationForm.date_computed
-
-            )
-
-            .join(RawMaterial, TempPreparationForm.rm_code_id == RawMaterial.id)  # Join TempPreparationForm with RawMaterial
-            .join(Warehouse, TempPreparationForm.warehouse_id == Warehouse.id)  # Join TempPreparationForm with Warehouse
-            .join(Status, TempPreparationForm.status_id == Status.id)
-            .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                or_(
-                    TempPreparationForm.is_cleared.is_(None),  # NULL check for is_cleared
-                    TempPreparationForm.is_cleared == False  # False check for is_cleared
-                ),
-                or_(
-                    TempPreparationForm.is_deleted.is_(None),  # NULL check for is_deleted
-                    TempPreparationForm.is_deleted == False  # False check for is_deleted
-                )
-            )
-            .order_by(desc(TempPreparationForm.created_at))  # Order from newest to oldest
+    def get_run_by_any_identifier(
+        self,
+        prod_lot_no: Optional[str] = None,
+        prep_form_no: Optional[str] = None,
+        prod_id: Optional[str] = None
+    ) -> Optional[PrepFormRun]:
+        """Looks up the active preparation run by Lot No, Prep Form No, or Product ID."""
+        query = (
+            self.db.query(PrepFormRun)
+            .join(PrepFormHeader, PrepFormRun.header_id == PrepFormHeader.id)
+            .filter(PrepFormHeader.is_active.is_(True))
         )
 
-        # Return All the result
-        return stmt.all()
+        if prod_lot_no:
+            cleaned_lot = prod_lot_no.strip().strip("'").strip('"').upper()
+            return query.filter(func.upper(PrepFormRun.lotno_prod) == cleaned_lot).first()
 
-    def get_deleted_preparation_form(self):
+        if prep_form_no:
+            cleaned_form = prep_form_no.strip().strip("'").strip('"')
+            return query.filter(func.cast(PrepFormHeader.prep_form_no, String) == cleaned_form).first()
 
-        """
-             Join StockOnHand, TempPreparationForm, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
-            self.db.query(
-                TempPreparationForm.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempPreparationForm.qty_prepared,
-                TempPreparationForm.qty_return,
-                TempPreparationForm.ref_number,
-                Warehouse.wh_name,
-                Status.name.label("status"),
-                TempPreparationForm.preparation_date,
-                TempPreparationForm.created_at,
-                TempPreparationForm.updated_at,
-                TempPreparationForm.date_computed
+        if prod_id:
+            cleaned_prod = prod_id.strip().strip("'").strip('"')
+            return query.filter(func.cast(PrepFormRun.prod_id, String) == cleaned_prod).first()
 
-            )
+        return None
 
-            .join(RawMaterial, TempPreparationForm.rm_code_id == RawMaterial.id)  # Join TempPreparationForm with RawMaterial
-            .join(Warehouse, TempPreparationForm.warehouse_id == Warehouse.id)  # Join TempPreparationForm with Warehouse
-            .join(Status, TempPreparationForm.status_id == Status.id)
-            .filter(
-                    TempPreparationForm.is_deleted == True  # False check for is_deleted
-            )
+    def get_details_by_run_id(self, run_id: UUID) -> List[PrepFormDetail]:
+        """Fetches recipe line items ordered by sequence number."""
+        return (
+            self.db.query(PrepFormDetail)
+            .filter(PrepFormDetail.run_id == run_id, PrepFormDetail.is_deleted.is_(False))
+            .order_by(PrepFormDetail.sequence_no.asc())
+            .all()
         )
 
-        # Return All the result
-        return stmt.all()
+    def get_prep_status_by_code(self, status_code: str) -> Optional[PrepStatus]:
+        """Finds traveler status code (e.g., 'COMPLETED') in schema_whprep."""
+        return (
+            self.db.query(PrepStatus)
+            .filter(func.upper(PrepStatus.status_code) == status_code.upper())
+            .first()
+        )
 
-    def get_historical_preparation_form(self, record_id):
+    def check_lot_already_deducted(self, prod_lot_no: str) -> bool:
+        """Verifies if deductions for this lot already exist in the inventory preparation."""
+        exists = (
+            self.db.query(TempPreparationForm.id)
+            .filter(
+                func.upper(TempPreparationForm.prod_lot_no) == prod_lot_no.strip().upper(),
+                TempPreparationForm.is_deleted.is_(False)
+            )
+            .first()
+        )
+        return exists is not None
 
+    # -----------------------------------------------------------------------
+    # 2. Universal Identifier Resolvers (schema_whrm)
+    # -----------------------------------------------------------------------
+
+    def resolve_raw_material(self, rm_code: str) -> Optional[RawMaterial]:
+        """Resolves material code to RawMaterial entity."""
+        cleaned = rm_code.replace(" ", "").upper()
+        return (
+            self.db.query(RawMaterial)
+            .filter(func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned)
+            .first()
+        )
+
+    def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
+        """Resolves warehouse number (or name) to Warehouse entity."""
+        target = str(wh_number).strip()
+        wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
+        if wh:
+            return wh
+        return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
+
+    def resolve_status(self, status_name: str) -> Optional[Status]:
+        """Resolves quality status name to Status entity."""
+        return (
+            self.db.query(Status)
+            .filter(func.lower(Status.name) == status_name.strip().lower())
+            .first()
+        )
+
+    # -----------------------------------------------------------------------
+    # 3. Ledger Management CRUD (schema_whrm.tbl_preparation_forms)
+    # -----------------------------------------------------------------------
+
+    def get_preparation_by_id(self, form_id: UUID) -> Optional[TempPreparationForm]:
+        """Fetches a single deduction row by primary UUID."""
+        return self.db.query(TempPreparationForm).filter(TempPreparationForm.id == form_id).first()
+
+    def create_inventory_deduction(self, record: TempPreparationForm) -> TempPreparationForm:
+        """Persists a new deduction record to schema_whrm."""
+        self.db.add(record)
+        return record
+
+    def list_active_preparation_records(self) -> List[dict]:
         """
-             Join StockOnHand, TempPreparationForm, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
+        Retrieves active, un-cleared preparation deduction records joined
+        with material, warehouse, and user lookup details.
+        """
+        results = (
             self.db.query(
                 TempPreparationForm.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempPreparationForm.qty_prepared,
-                TempPreparationForm.qty_return,
                 TempPreparationForm.ref_number,
+                TempPreparationForm.prod_lot_no,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
                 Warehouse.wh_name,
+                Warehouse.wh_number,
                 Status.name.label("status"),
+                TempPreparationForm.qty_required,
+                TempPreparationForm.qty_prepared,
+                TempPreparationForm.add_qty,
+                TempPreparationForm.qty_return,
+                TempPreparationForm.rm_lot_no,
                 TempPreparationForm.preparation_date,
                 TempPreparationForm.created_at,
                 TempPreparationForm.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 TempPreparationForm.date_computed,
-                TempPreparationForm.is_adjusted
-
-
+                TempPreparationForm.is_adjusted,
+                TempPreparationForm.is_cleared
             )
-
-            .join(RawMaterial, TempPreparationForm.rm_code_id == RawMaterial.id)  # Join TempPreparationForm with RawMaterial
-            .join(Warehouse, TempPreparationForm.warehouse_id == Warehouse.id)  # Join TempPreparationForm with Warehouse
+            .join(RawMaterial, TempPreparationForm.rm_code_id == RawMaterial.id)
+            .join(Warehouse, TempPreparationForm.warehouse_id == Warehouse.id)
             .join(Status, TempPreparationForm.status_id == Status.id)
+            .outerjoin(User, TempPreparationForm.created_by_id == User.id)
             .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                #     TempPreparationForm.is_cleared == True,  # False check for is_cleared
-                    TempPreparationForm.date_computed.is_not(None)
-                ,
-                or_(
-                    TempPreparationForm.is_deleted.is_(None),  # NULL check for is_deleted
-                    TempPreparationForm.is_deleted == False  # False check for is_deleted
-                )
+                or_(TempPreparationForm.is_cleared.is_(None), TempPreparationForm.is_cleared.is_(False)),
+                or_(TempPreparationForm.is_deleted.is_(None), TempPreparationForm.is_deleted.is_(False))
+            )
+            .order_by(desc(TempPreparationForm.created_at))
+            .all()
+        )
+        return results
 
+    def list_deleted_preparation_records(self) -> List[dict]:
+        """Retrieves all soft-deleted preparation deduction records for recovery/auditing."""
+        results = (
+            self.db.query(
+                TempPreparationForm.id,
+                TempPreparationForm.ref_number,
+                TempPreparationForm.prod_lot_no,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                Warehouse.wh_name,
+                Warehouse.wh_number,
+                Status.name.label("status"),
+                TempPreparationForm.qty_required,
+                TempPreparationForm.qty_prepared,
+                TempPreparationForm.add_qty,
+                TempPreparationForm.qty_return,
+                TempPreparationForm.rm_lot_no,
+                TempPreparationForm.preparation_date,
+                TempPreparationForm.created_at,
+                TempPreparationForm.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
+                TempPreparationForm.date_computed,
+                TempPreparationForm.is_adjusted,
+                TempPreparationForm.is_cleared
+            )
+            .join(RawMaterial, TempPreparationForm.rm_code_id == RawMaterial.id)
+            .join(Warehouse, TempPreparationForm.warehouse_id == Warehouse.id)
+            .join(Status, TempPreparationForm.status_id == Status.id)
+            .outerjoin(User, TempPreparationForm.created_by_id == User.id)
+            .filter(TempPreparationForm.is_deleted.is_(True))
+            .order_by(desc(TempPreparationForm.updated_at))
+            .all()
+        )
+        return results
+
+    def list_historical_preparation_records(self, record_id: Optional[str] = None) -> List[dict]:
+        """Retrieves computed historical preparation records for audit trail analysis."""
+        query = (
+            self.db.query(
+                TempPreparationForm.id,
+                TempPreparationForm.ref_number,
+                TempPreparationForm.prod_lot_no,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                Warehouse.wh_name,
+                Warehouse.wh_number,
+                Status.name.label("status"),
+                TempPreparationForm.qty_required,
+                TempPreparationForm.qty_prepared,
+                TempPreparationForm.add_qty,
+                TempPreparationForm.qty_return,
+                TempPreparationForm.rm_lot_no,
+                TempPreparationForm.preparation_date,
+                TempPreparationForm.created_at,
+                TempPreparationForm.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
+                TempPreparationForm.date_computed,
+                TempPreparationForm.is_adjusted,
+                TempPreparationForm.is_cleared
+            )
+            .join(RawMaterial, TempPreparationForm.rm_code_id == RawMaterial.id)
+            .join(Warehouse, TempPreparationForm.warehouse_id == Warehouse.id)
+            .join(Status, TempPreparationForm.status_id == Status.id)
+            .outerjoin(User, TempPreparationForm.created_by_id == User.id)
+            .filter(
+                TempPreparationForm.date_computed.is_not(None),
+                or_(TempPreparationForm.is_deleted.is_(None), TempPreparationForm.is_deleted.is_(False))
             )
         )
+        if record_id:
+            query = query.filter(func.cast(TempPreparationForm.id, String) == record_id.strip())
 
-        if stmt:
-            if record_id:
-                stmt = stmt.filter(TempPreparationForm.id == record_id)
-
-            return stmt.all()
-        else:
-            return []
-
-
-
-    def update_preparation_form(self, preparation_form_id: UUID, preparation_form_update: TempPreparationFormUpdate):
-        try:
-            preparation_form = self.db.query(TempPreparationForm).filter(TempPreparationForm.id == preparation_form_id).first()
-            if not preparation_form or preparation_form.is_deleted:
-                raise TempPreparationFormNotFoundException(detail="Preparation Form not found or already deleted.")
-
-            for key, value in preparation_form_update.dict(exclude_unset=True).items():
-                setattr(preparation_form, key, value)
-            self.db.commit()
-            self.db.refresh(preparation_form)
-            return self.get_preparation_form()
-
-        except Exception as e:
-            raise TempPreparationFormUpdateException(detail=f"Error: {str(e)}")
-
-    def soft_delete_preparation_form(self, preparation_form_id: UUID):
-        try:
-            preparation_form = self.db.query(TempPreparationForm).filter(TempPreparationForm.id == preparation_form_id).first()
-            if not preparation_form or preparation_form.is_deleted:
-                raise TempPreparationFormNotFoundException(detail="Preparation Form not found or already deleted.")
-
-            preparation_form.is_deleted = True
-            self.db.commit()
-            self.db.refresh(preparation_form)
-            return self.get_preparation_form()
-
-        except Exception as e:
-            raise TempPreparationFormSoftDeleteException(detail=f"Error: {str(e)}")
-
-
-    def restore_preparation_form(self, preparation_form_id: UUID):
-        try:
-            preparation_form = self.db.query(TempPreparationForm).filter(TempPreparationForm.id == preparation_form_id).first()
-            if not preparation_form or not preparation_form.is_deleted:
-                raise TempPreparationFormNotFoundException(detail="Preparation Form not found or already restored.")
-
-            preparation_form.is_deleted = False
-            self.db.commit()
-            self.db.refresh(preparation_form)
-            return preparation_form
-
-        except Exception as e:
-            raise TempPreparationFormRestoreException(detail=f"Error: {str(e)}")
-
+        return query.order_by(desc(TempPreparationForm.date_computed)).all()

@@ -1,139 +1,131 @@
-# backend/api_raw_materials/v1/exceptions.py
+"""
+Data Access Layer (CRUD) for Raw Materials.
 
-from api_rm_inv.api_raw_materials.v1.exceptions import (RawMaterialNotFoundException,
-                                                        RawMaterialUpdateException,
-                                                        RawMaterialSoftDeleteException,
-                                                        RawMaterialRestoreException
-                                                        )
-from api_rm_inv.api_raw_materials.v1.main import AppCRUD
-from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_raw_materials.v1.schemas import RawMaterialCreate, RawMaterialUpdate
-from api_rm_inv.api_users.v1.models import User
-from sqlalchemy.sql import func
+Contains direct SQLAlchemy database queries and writes.
+Kept strictly free of HTTP exceptions and request handling.
+"""
+
+from typing import List, Optional, Tuple
 from uuid import UUID
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import func
+
+from core.base import BaseRepository
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
+from api_rm_inv.api_raw_materials.v1.schemas import RawMaterialCreate
+from shared.users.models import User
 
 
-# These are the code for the app to communicate to the database
-class RawMaterialCRUD(AppCRUD):
-    def create_raw_material(self, raw_material: RawMaterialCreate):
-        # Normalize the input: Remove spaces and convert to uppercase
-        normalized_rm_code = raw_material.rm_code.replace(" ", "").upper()
+class RawMaterialCRUD(BaseRepository):
+    """Encapsulates all database interactions for the tbl_raw_materials table."""
 
-        # Check if an existing raw material has the same normalized rm_code
-        existing_rm = self.db.query(RawMaterial).filter(
-            func.replace(func.upper(RawMaterial.rm_code), " ", "") == normalized_rm_code
-        ).first()
+    def get_by_id(self, rm_id: UUID, include_deleted: bool = False) -> Optional[RawMaterial]:
+        """
+        Fetches a raw material record by its internal primary UUID.
 
-        if existing_rm:
-            raise Exception(status_code=400, detail="Raw material code already exists.")
+        Args:
+            rm_id: The UUID of the raw material.
+            include_deleted: If False, ignores soft-deleted records.
+        """
+        query = self.db.query(RawMaterial).filter(RawMaterial.id == rm_id)
+        if not include_deleted:
+            query = query.filter(RawMaterial.is_deleted.is_(False))
+        return query.first()
 
+    def get_by_code(self, rm_code: str, include_deleted: bool = False) -> Optional[RawMaterial]:
+        """
+        Performs a case-insensitive lookup for a raw material by code,
+        stripping out any spaces to prevent accidental duplicates like 'RM 101' vs 'RM101'.
 
-        else:
-            # If no duplicate, proceed with creation
-            raw_material_item = RawMaterial(
-                rm_code=raw_material.rm_code,
-                description=raw_material.description,
-                rm_name=raw_material.rm_name,
-                updated_by_id=raw_material.updated_by_id,
-                created_by_id=raw_material.created_by_id
-            )
-
-            try:
-                self.db.add(raw_material_item)
-                self.db.commit()
-                self.db.refresh(raw_material_item)
-                return raw_material_item
-            except IntegrityError:
-                self.db.rollback()
-                raise Exception(status_code=500, detail="Error while creating raw material.")
-
-    def import_raw_material(self, rm_code):
-        # Insert data into the StockOnHand table
-        new_raw_material = RawMaterial(
-            rm_code=rm_code
+        Args:
+            rm_code: The material code string to look up.
+            include_deleted: If True, searches both active and soft-deleted items.
+        """
+        normalized_target = rm_code.replace(" ", "").upper()
+        query = self.db.query(RawMaterial).filter(
+            func.replace(func.upper(RawMaterial.rm_code), " ", "") == normalized_target
         )
-        self.db.add(new_raw_material)
-        self.db.commit()
-        self.db.refresh(new_raw_material)
+        if not include_deleted:
+            query = query.filter(RawMaterial.is_deleted.is_(False))
+        return query.first()
 
-    def all_raw_material(self):
-        raw_material_item = self.db.query(RawMaterial).all()
-        if raw_material_item:
-            return raw_material_item
-        return []
+    def get_all(self, include_deleted: bool = False) -> List[RawMaterial]:
+        """Returns all raw materials sorted alphabetically by material code."""
+        query = self.db.query(RawMaterial)
+        if not include_deleted:
+            query = query.filter(RawMaterial.is_deleted.is_(False))
+        return query.order_by(RawMaterial.rm_code.asc()).all()
 
-    def all_transformed_raw_material(self):
-        # Join tables
-        stmt = (
+    def get_all_transformed(self) -> List[dict]:
+        """
+        Queries active raw materials and joins the shared User table to display
+        the creator's readable full name.
+        """
+        return (
             self.db.query(
-                RawMaterial.id.label("id"),
+                RawMaterial.id,
                 RawMaterial.rm_code,
+                RawMaterial.rm_name,
                 RawMaterial.created_at,
                 RawMaterial.updated_at,
                 func.concat(User.first_name, " ", User.last_name).label("created_by")
-
             )
-            .outerjoin(User,
-                       User.id == RawMaterial.created_by_id)  # Left join StockOnHand with ReceivingReport
-
+            .outerjoin(User, User.id == RawMaterial.created_by_id)
+            .filter(RawMaterial.is_deleted.is_(False))
+            .order_by(RawMaterial.rm_code.asc())
+            .all()
         )
 
-        # Return All the result
-        return stmt.all()
-
-    def get_raw_material(self, rm_code):
-
-        computed_detail_item = (
-            self.db.query(RawMaterial).filter(
-                RawMaterial.rm_code == rm_code
-            ).first()
+    def create(self, payload: RawMaterialCreate) -> RawMaterial:
+        """Persists a new raw material record to the database."""
+        item = RawMaterial(
+            rm_code=payload.rm_code.strip().upper(),
+            rm_name=payload.rm_name,
+            description=payload.description,
+            type=payload.type,
+            created_by_id=payload.created_by_id
         )
-        if computed_detail_item:
-            return computed_detail_item
-        return None
+        self.db.add(item)
+        self.db.commit()
+        self.db.refresh(item)
+        return item
 
+    def set_deleted_flag(self, item: RawMaterial, is_deleted: bool, user_id: Optional[UUID] = None) -> RawMaterial:
+        """Toggles the soft-deleted status of a material record."""
+        item.is_deleted = is_deleted
+        if is_deleted and user_id:
+            item.deleted_by_id = user_id
+        self.db.commit()
+        self.db.refresh(item)
+        return item
 
-    def update_raw_material(self, rm_id: UUID, raw_material_update: RawMaterialUpdate):
-        try:
-            raw_material = self.db.query(RawMaterial).filter(RawMaterial.id == rm_id).first()
-            if not raw_material or raw_material.is_deleted:
-                raise RawMaterialNotFoundException(detail="Raw Material not found or already deleted.")
+    def bulk_create_ignore_duplicates(self, rm_codes: List[str]) -> Tuple[int, int]:
+        """
+        High-performance bulk insert that checks existing codes in memory
+        and saves all new records in a single database transaction.
 
-            for key, value in raw_material_update.dict(exclude_unset=True).items():
-                setattr(raw_material, key, value)
+        Returns:
+            Tuple[int, int]: (count_inserted, count_skipped)
+        """
+        # Fetch all existing material codes from the DB in a single lightweight query
+        existing_codes = {
+            row[0].strip().upper()
+            for row in self.db.query(RawMaterial.rm_code).all()
+        }
+
+        new_records = []
+        skipped_count = 0
+
+        for code in rm_codes:
+            cleaned_code = str(code).strip().upper()
+            if not cleaned_code or cleaned_code in existing_codes:
+                skipped_count += 1
+                continue
+
+            new_records.append(RawMaterial(rm_code=cleaned_code))
+            existing_codes.add(cleaned_code)  # Track so duplicates inside the same file are ignored
+
+        if new_records:
+            self.db.bulk_save_objects(new_records)
             self.db.commit()
-            self.db.refresh(raw_material)
-            return raw_material
 
-        except Exception as e:
-            raise RawMaterialUpdateException(detail=f"Error: {str(e)}")
-
-    def soft_delete_raw_material(self, rm_id: UUID):
-        try:
-            raw_material = self.db.query(RawMaterial).filter(RawMaterial.id == rm_id).first()
-            if not raw_material or raw_material.is_deleted:
-                raise RawMaterialNotFoundException(detail="Raw Material not found or already deleted.")
-
-            raw_material.is_deleted = True
-            self.db.commit()
-            self.db.refresh(raw_material)
-            return raw_material
-
-        except Exception as e:
-            raise RawMaterialSoftDeleteException(detail=f"Error: {str(e)}")
-
-
-    def restore_raw_material(self, rm_id: UUID):
-        try:
-            raw_material = self.db.query(RawMaterial).filter(RawMaterial.id == rm_id).first()
-            if not raw_material or not raw_material.is_deleted:
-                raise RawMaterialNotFoundException(detail="Raw Material not found or already restored.")
-
-            raw_material.is_deleted = False
-            self.db.commit()
-            self.db.refresh(raw_material)
-            return raw_material
-
-        except Exception as e:
-            raise RawMaterialRestoreException(detail=f"Error: {str(e)}")
+        return len(new_records), skipped_count

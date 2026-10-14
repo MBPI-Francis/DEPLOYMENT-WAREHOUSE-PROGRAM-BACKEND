@@ -1,39 +1,27 @@
+"""
+Shared Inventory Status Model.
+
+Universal quality classification statuses ('good', 'held : reject', etc.)
+used across Raw Materials, Finished Goods, and Production.
+"""
+
 import uuid
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, SmallInteger, event
+from sqlalchemy import Column, String
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-from api_rm_inv.settings.database import Base  # Assuming Base is imported from your database setup
-from api_rm_inv.api_users.v1.models import User
+from core.database import Base
 
 
-# Parent Model: Department
 class Status(Base):
     """
-    Database model for inventory quality classification statuses.
-
-    Attributes:
-        id: Primary key UUID identifying the status category.
-        name: Categorical name (e.g., 'good', 'held : reject', 'held : contaminated').
+    Central database entity for inventory condition statuses.
     """
-
-
     __tablename__ = "tbl_status"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
-
-    name = Column(String(150), nullable=False, unique=True)
-    description = Column(String(300), nullable=True)
-    is_deleted = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=True)
-    created_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    updated_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-
-    # Relationships for created_by, updated_by, and deleted_by
-    created_by = relationship("User", foreign_keys=[created_by_id], backref="created_status")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], backref="updated_status")
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id], backref="deleted_status")
-
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        unique=True,
+        index=True
+    )
+    name = Column(String(100), nullable=False, unique=True)
