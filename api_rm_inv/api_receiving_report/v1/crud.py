@@ -1,277 +1,190 @@
-# These are the code for the app to communicate to the database
-from api_rm_inv.api_receiving_report.v1.exceptions import TempReceivingReportCreateException, TempReceivingReportNotFoundException, \
-    TempReceivingReportUpdateException, TempReceivingReportSoftDeleteException, TempReceivingReportRestoreException
-from api_rm_inv.api_receiving_report.v1.main import AppCRUD, AppService
-from api_rm_inv.api_receiving_report.v1.models import TempReceivingReport
-from api_rm_inv.api_receiving_report.v1.schemas import TempReceivingReportCreate, TempReceivingReportUpdate
-from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_status.v1.models import Status
-from api_rm_inv.api_warehouses.v1.models import Warehouse
+"""
+Data Access Layer (CRUD) for Receiving Reports.
+
+Handles queries, writes, and StockOnHand auto-initialization in schema_whrm.
+"""
+
+from decimal import Decimal
+from typing import List, Optional
 from uuid import UUID
+from sqlalchemy import text, desc, or_, func
+
+from core.base import BaseRepository
+from api_rm_inv.api_receiving_report.v1.models import TempReceivingReport
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
 from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
-from sqlalchemy import desc, or_
-from sqlalchemy.sql import func, cast, case
-from sqlalchemy.types import String
-from sqlalchemy import text
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from shared.users.models import User
 
 
-class TempReceivingReportCRUD(AppCRUD):
-    def create_receiving_report(self, receiving_report: TempReceivingReportCreate):
+class TempReceivingReportCRUD(BaseRepository):
+    """Repository handling database operations for inbound receiving reports."""
 
-        # Check if the status id is null
-        query = text("""SELECT * FROM view_beginning_soh
-                        WHERE warehouseid = :warehouse_id
-                              AND rawmaterialid = :rm_code_id
-                              AND statusid = :status_id""")
+    def resolve_raw_material(self, rm_code: str) -> Optional[RawMaterial]:
+        """Looks up a material by its code, ignoring spaces and case."""
+        cleaned = rm_code.replace(" ", "").upper()
+        return (
+            self.db.query(RawMaterial)
+            .filter(func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned)
+            .first()
+        )
 
+    def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
+        """Looks up a warehouse by number or name."""
+        target = str(wh_number).strip()
+        wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
+        if wh:
+            return wh
+        return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
 
+    def resolve_status(self, status_name: str) -> Optional[Status]:
+        """Looks up a quality status by name."""
+        return (
+            self.db.query(Status)
+            .filter(func.lower(Status.name) == status_name.strip().lower())
+            .first()
+        )
 
-        record = self.db.execute(query, {
-            "warehouse_id": receiving_report.warehouse_id,
-            "rm_code_id": receiving_report.rm_code_id,
-            "status_id": receiving_report.status_id
-        }).fetchone()  # or .fetchall() if expecting multiple rows
-        result = record
+    def ensure_stock_on_hand_initialized(self, rm_id: UUID, wh_id: UUID, status_id: UUID) -> None:
+        """
+        Guarantees that a base StockOnHand row exists for this (material, warehouse, status) tuple.
+        If missing, provisions a base record with rm_soh = 0.00 so SQL calculation views stay balanced.
+        """
+        check_query = text("""
+            SELECT 1 FROM schema_whrm.view_beginning_soh
+            WHERE warehouseid = :warehouse_id
+              AND rawmaterialid = :rm_code_id
+              AND statusid = :status_id
+            LIMIT 1
+        """)
+        exists = self.db.execute(check_query, {
+            "warehouse_id": wh_id,
+            "rm_code_id": rm_id,
+            "status_id": status_id
+        }).fetchone()
 
-        # This feature is required for the calculation
-        if not result:
+        if not exists:
+            # Safely extract audit metadata using named column mapping
+            meta_query = text("""
+                SELECT date_computed, recalculation_count 
+                FROM schema_whrm.view_beginning_soh 
+                ORDER BY recalculation_count DESC 
+                LIMIT 1
+            """)
+            meta_record = self.db.execute(meta_query).mappings().fetchone()
 
-            # Get the date computed date from other existing records
-            existing_query = text("""SELECT * FROM view_beginning_soh""")
+            date_computed = meta_record["date_computed"] if meta_record else None
+            recalc_count = meta_record["recalculation_count"] if meta_record else 1
 
-            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-            # Extract date_computed if record exists, else use None
-            date_computed = existing_record[9] if existing_record else None
-
-            # Extract the stock_recalculation_count value
-            stock_recalculation_count = existing_record[10] if existing_record else None
-
-            # Create a new StockOnHand record
             new_stock = StockOnHand(
-                rm_code_id=receiving_report.rm_code_id,
-                warehouse_id=receiving_report.warehouse_id,
-                rm_soh=0.00,
-                status_id=receiving_report.status_id,
+                rm_code_id=rm_id,
+                warehouse_id=wh_id,
+                status_id=status_id,
+                rm_soh=Decimal("0.00"),
                 date_computed=date_computed,
- 		stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                stock_recalculation_count=recalc_count
             )
             self.db.add(new_stock)
-            self.db.commit()
-            self.db.refresh(new_stock)
+            self.db.flush()
 
+    def get_by_id(self, report_id: UUID) -> Optional[TempReceivingReport]:
+        """Fetches a single receiving report by primary UUID."""
+        return self.db.query(TempReceivingReport).filter(TempReceivingReport.id == report_id).first()
 
-        receiving_report_item = TempReceivingReport(rm_code_id=receiving_report.rm_code_id,
-                                                   warehouse_id=receiving_report.warehouse_id,
-                                                   ref_number=receiving_report.ref_number,
-                                                   receiving_date=receiving_report.receiving_date,
-                                                   qty_kg=receiving_report.qty_kg,
-                                                    status_id=receiving_report.status_id
-                                                   )
-
-
-        self.db.add(receiving_report_item)
+    def create(self, record: TempReceivingReport) -> TempReceivingReport:
+        """Persists a new receiving report entry."""
+        self.db.add(record)
         self.db.commit()
-        self.db.refresh(receiving_report_item)
-        return receiving_report_item
+        self.db.refresh(record)
+        return record
 
-    def get_receiving_report(self):
-        """
-        Join StockOnHand, ReceivingReport, Warehouse, and RawMaterial tables.
-        """
-        # Join tables
-        stmt = (
+    def list_active(self) -> List[dict]:
+        """Retrieves active receiving reports with material, warehouse, and user details."""
+        return (
             self.db.query(
                 TempReceivingReport.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempReceivingReport.qty_kg,
                 TempReceivingReport.ref_number,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
                 Warehouse.wh_name,
+                Warehouse.wh_number,
                 Status.name.label("status"),
                 TempReceivingReport.receiving_date,
-                TempReceivingReport.created_at,
-                TempReceivingReport.updated_at
-
-            )
-            .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial
-            .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id) # Join Receiving Report with Warehouse
-            .join(Status, TempReceivingReport.status_id == Status.id)
-            .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                or_(
-                    TempReceivingReport.is_cleared.is_(None),  # NULL check for is_cleared
-                    TempReceivingReport.is_cleared == False  # False check for is_cleared
-                ),
-                or_(
-                    TempReceivingReport.is_deleted.is_(None),  # NULL check for is_deleted
-                    TempReceivingReport.is_deleted == False  # False check for is_deleted
-                )
-            )
-
-            .order_by(desc(TempReceivingReport.created_at))  # Order from newest to oldest
-        )
-
-        # Return All the result
-        return stmt.all()
-
-
-
-    def get_deleted_receiving_report(self):
-        """
-        Join StockOnHand, ReceivingReport, Warehouse, and RawMaterial tables.
-        """
-        # Join tables
-        stmt = (
-            self.db.query(
-                TempReceivingReport.id,
-                RawMaterial.rm_code.label("raw_material"),
                 TempReceivingReport.qty_kg,
-                TempReceivingReport.ref_number,
-                Warehouse.wh_name,
-                Status.name.label("status"),
-                TempReceivingReport.receiving_date,
-                TempReceivingReport.created_at,
-                TempReceivingReport.updated_at
-
-            )
-            .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial
-            .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id) # Join Receiving Report with Warehouse
-            .join(Status, TempReceivingReport.status_id == Status.id)
-            .filter(
-                    TempReceivingReport.is_deleted == True  # False check for is_deleted
-            )
-        )
-
-        # Return All the result
-        return stmt.all()
-
-
-
-    def get_historical_receiving_report(self, record_id):
-        """
-        Join StockOnHand, ReceivingReport, Warehouse, and RawMaterial tables.
-        """
-        # Join tables
-        stmt = (
-            self.db.query(
-                TempReceivingReport.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempReceivingReport.qty_kg,
-                TempReceivingReport.ref_number,
-                Warehouse.wh_name,
-                Status.name.label("status"),
-                TempReceivingReport.receiving_date,
                 TempReceivingReport.created_at,
                 TempReceivingReport.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 TempReceivingReport.date_computed,
                 TempReceivingReport.is_adjusted
-
             )
-            .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)       # Join Receiving Report with RawMaterial
-            .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id) # Join Receiving Report with Warehouse
+            .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)
+            .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id)
             .join(Status, TempReceivingReport.status_id == Status.id)
+            .outerjoin(User, TempReceivingReport.created_by_id == User.id)
             .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                #     TempReceivingReport.is_cleared == True,  # False check for is_cleared
-                    TempReceivingReport.date_computed.is_not(None)
-                ,
-                or_(
-                    TempReceivingReport.is_deleted.is_(None),  # NULL check for is_deleted
-                    TempReceivingReport.is_deleted == False  # False check for is_deleted
-                )
+                or_(TempReceivingReport.is_cleared.is_(None), TempReceivingReport.is_cleared.is_(False)),
+                or_(TempReceivingReport.is_deleted.is_(None), TempReceivingReport.is_deleted.is_(False))
             )
+            .order_by(desc(TempReceivingReport.created_at))
+            .all()
         )
 
-        if stmt:
-            if record_id:
-                stmt = stmt.filter(TempReceivingReport.id == record_id)
-
-            return stmt.all()
-        else:
-            return []
-
-    def update_receiving_report(self, receiving_report_id: UUID, receiving_report_update: TempReceivingReportUpdate):
-
-        # Check if the status id is null
-        query = text("""SELECT * FROM view_beginning_soh
-                                WHERE warehouseid = :warehouse_id
-                                      AND rawmaterialid = :rm_code_id
-                                      AND statusid = :status_id""")
-
-        record = self.db.execute(query, {
-            "warehouse_id": receiving_report_update.warehouse_id,
-            "rm_code_id": receiving_report_update.rm_code_id,
-            "status_id": receiving_report_update.status_id
-        }).fetchone()  # or .fetchall() if expecting multiple rows
-        result = record
-
-        # This feature is required for the calculation
-        if not result:
-            # Get the date computed date from other existing records
-            existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-            # Extract date_computed if record exists, else use None
-            date_computed = existing_record[9] if existing_record else None
-
-            # Extract the stock_recalculation_count value
-            stock_recalculation_count = existing_record[10] if existing_record else None
-
-            # Create a new StockOnHand record
-            new_stock = StockOnHand(
-                rm_code_id=receiving_report_update.rm_code_id,
-                warehouse_id=receiving_report_update.warehouse_id,
-                rm_soh=0.00,
-                status_id=receiving_report_update.status_id,
-                date_computed=date_computed,
-                stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+    def list_deleted(self) -> List[dict]:
+        """Retrieves soft-deleted receiving reports for audit recovery."""
+        return (
+            self.db.query(
+                TempReceivingReport.id,
+                TempReceivingReport.ref_number,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                Warehouse.wh_name,
+                Warehouse.wh_number,
+                Status.name.label("status"),
+                TempReceivingReport.receiving_date,
+                TempReceivingReport.qty_kg,
+                TempReceivingReport.created_at,
+                TempReceivingReport.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by")
             )
-            self.db.add(new_stock)
-            self.db.commit()
-            self.db.refresh(new_stock)
+            .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)
+            .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id)
+            .join(Status, TempReceivingReport.status_id == Status.id)
+            .outerjoin(User, TempReceivingReport.created_by_id == User.id)
+            .filter(TempReceivingReport.is_deleted.is_(True))
+            .order_by(desc(TempReceivingReport.updated_at))
+            .all()
+        )
 
-        try:
-            receiving_report = self.db.query(TempReceivingReport).filter(TempReceivingReport.id == receiving_report_id).first()
-            if not receiving_report or receiving_report.is_deleted:
-                raise TempReceivingReportNotFoundException(detail="Receiving Report not found or already deleted.")
+    def list_historical(self, record_id: Optional[UUID] = None) -> List[dict]:
+        """Retrieves historical reports that have already been computed into closing balances."""
+        query = (
+            self.db.query(
+                TempReceivingReport.id,
+                TempReceivingReport.ref_number,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                Warehouse.wh_name,
+                Warehouse.wh_number,
+                Status.name.label("status"),
+                TempReceivingReport.receiving_date,
+                TempReceivingReport.qty_kg,
+                TempReceivingReport.created_at,
+                TempReceivingReport.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
+                TempReceivingReport.date_computed,
+                TempReceivingReport.is_adjusted
+            )
+            .join(RawMaterial, TempReceivingReport.rm_code_id == RawMaterial.id)
+            .join(Warehouse, TempReceivingReport.warehouse_id == Warehouse.id)
+            .join(Status, TempReceivingReport.status_id == Status.id)
+            .outerjoin(User, TempReceivingReport.created_by_id == User.id)
+            .filter(
+                TempReceivingReport.date_computed.is_not(None),
+                or_(TempReceivingReport.is_deleted.is_(None), TempReceivingReport.is_deleted.is_(False))
+            )
+        )
+        if record_id:
+            query = query.filter(TempReceivingReport.id == record_id)
 
-            for key, value in receiving_report_update.dict(exclude_unset=True).items():
-                setattr(receiving_report, key, value)
-            self.db.commit()
-            self.db.refresh(receiving_report)
-            return self.get_receiving_report()
-
-        except Exception as e:
-            raise TempReceivingReportUpdateException(detail=f"Error: {str(e)}")
-
-
-    def soft_delete_receiving_report(self, receiving_report_id: UUID):
-        try:
-            receiving_report = self.db.query(TempReceivingReport).filter(TempReceivingReport.id == receiving_report_id).first()
-            if not receiving_report or receiving_report.is_deleted:
-                raise TempReceivingReportNotFoundException(detail="Receiving Report not found or already deleted.")
-
-            receiving_report.is_deleted = True
-            self.db.commit()
-            self.db.refresh(receiving_report)
-            rr_list = self.get_receiving_report()
-            return rr_list
-
-        except Exception as e:
-            raise TempReceivingReportSoftDeleteException(detail=f"Error: {str(e)}")
-
-
-    def restore_receiving_report(self, receiving_report_id: UUID):
-        try:
-            receiving_report = self.db.query(TempReceivingReport).filter(TempReceivingReport.id == receiving_report_id).first()
-            if not receiving_report or not receiving_report.is_deleted:
-                raise TempReceivingReportNotFoundException(detail="Receiving Report not found or already restored.")
-
-            receiving_report.is_deleted = False
-            self.db.commit()
-            self.db.refresh(receiving_report)
-            return receiving_report
-
-        except Exception as e:
-            raise TempReceivingReportRestoreException(detail=f"Error: {str(e)}")
+        return query.order_by(desc(TempReceivingReport.date_computed)).all()

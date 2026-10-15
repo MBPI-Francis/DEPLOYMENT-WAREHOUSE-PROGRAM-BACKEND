@@ -1,48 +1,74 @@
+"""
+Change Status (Held Form) Database Entity Model.
+
+Represents quality reclassifications (e.g., releasing from evaluation to good,
+or quarantining to contaminated/rejected) mapped to schema_whrm.tbl_held_forms.
+"""
+
 import uuid
-from sqlalchemy import Column, ForeignKey, DateTime, Boolean, Date, Numeric, String
+from datetime import datetime, timezone, date
+from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Date, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-from api_rm_inv.settings.database import Base  # Assuming Base is imported from your database setup
+
+from core.database import Base
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from shared.users.models import User
 
 
-# Parent Model: Department
 class TempHeldForm(Base):
+    """
+    Database entity for Quality Status Change Forms (Held Forms).
+
+    Tracks material shifting from current_status_id (deducted)
+    to new_status_id (added) within schema_whrm.view_ending_stocks_balance.
+    """
     __tablename__ = "tbl_held_forms"
+    __table_args__ = {"schema": "schema_whrm", "extend_existing": True}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
-    rm_code_id = Column(UUID(as_uuid=True), ForeignKey("tbl_raw_materials.id"), nullable=False)
-    warehouse_id = Column(UUID(as_uuid=True), ForeignKey("tbl_warehouses.id"), nullable=False)
-    current_status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=True)
-    new_status_id = Column(UUID(as_uuid=True), ForeignKey("tbl_status.id"), nullable=True)
-    
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        unique=True,
+        index=True
+    )
+    rm_code_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_raw_materials.id"), nullable=False)
+    warehouse_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_warehouses.id"), nullable=False)
+    current_status_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_status.id"), nullable=False)
+    new_status_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_status.id"), nullable=False)
 
-    change_status_date = Column(Date,nullable=False)
-    ref_number = Column(String(50), nullable=False, unique=False)
+    ref_number = Column(String(50), nullable=False, index=True)
+    change_status_date = Column(Date, nullable=False, default=date.today)
     qty_kg = Column(Numeric(10, 2), nullable=False)
-    is_deleted = Column(Boolean, default=False)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=True)
-    created_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    updated_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    is_cleared = Column(Boolean, default=False, nullable=False)
+    is_adjusted = Column(Boolean, default=False, nullable=False)
     date_computed = Column(Date, nullable=True)
-    is_cleared = Column(Boolean, default=False)
-    is_adjusted = Column(Boolean, default=False)
 
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
-    # Relationships for created_by, updated_by, and deleted_by
-    created_by = relationship("User", foreign_keys=[created_by_id], backref="created_held_form_temp")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], backref="updated_held_form_temp")
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id], backref="deleted_held_form_temp")
-    rm_code = relationship("RawMaterial", foreign_keys=[rm_code_id], backref="rm_held_form_temp")
-    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id], backref="warehouse_held_form_temp")
-    current_status = relationship("Status", foreign_keys=[current_status_id], backref="current_status_held_form_temp")
-    new_status = relationship("Status", foreign_keys=[new_status_id], backref="new_status_held_form_temp")
+    created_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
+    updated_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
+    deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
 
-
-
-
-
+    # Relationships for audit display
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+    deleted_by = relationship("User", foreign_keys=[deleted_by_id])
+    rm_code = relationship("RawMaterial", foreign_keys=[rm_code_id])
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
+    current_status = relationship("Status", foreign_keys=[current_status_id])
+    new_status = relationship("Status", foreign_keys=[new_status_id])

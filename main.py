@@ -1,19 +1,21 @@
 """
 Main Application Entry Point.
 
-Boots the FastAPI application, mounts multi-department routers 
-(Raw Materials, Finished Goods, Production), and initializes background services.
+Boots the FastAPI application, configures CORS and GZip compression middleware,
+mounts multi-department routers, and initializes background tasks.
 """
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
-# Core database and background tasks
-from core.database import engine, Base
+# Core configuration and database
+from core.config import settings
+from core.database import engine, Base, ensure_schema_exists
 from core.scheduler import start_scheduler
 
-# RM Inventory module setup and views
+# RM Inventory master router and views
 from api_rm_inv.router import rm_router
 from api_rm_inv.settings.create_view_table import (
     create_beginning_view_table,
@@ -26,39 +28,45 @@ from api_rm_inv.settings.create_product_kind import create_product_kind
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Handles application startup and shutdown events cleanly.
-    Modern replacement for deprecated @app.on_event('startup').
-    """
-    # 1. Ensure all database tables exist
-    print("INFO: Initializing database tables...")
+    """Initializes schemas, tables, views, and maintenance tasks on server boot."""
+    print("INFO: Initializing database infrastructure...")
+
+    # 1. Guarantee schema_whrm exists in mbpi_erp_db
+    ensure_schema_exists()
+
+    # 2. Create tables inside schema_whrm
     Base.metadata.create_all(bind=engine)
 
-    # 2. Initialize RM database views and default product kinds
-    print("INFO: Initializing RM stock views...")
+    # 3. Create/verify RM calculation views inside schema_whrm
     create_beginning_view_table()
     create_ending_view_table()
     create_adjusted_ending_view_table()
     create_view_form_entries_log_table()
     create_product_kind()
 
-    # 3. Start automated daily backup scheduler
+    # 4. Start automated daily backup scheduler
     start_scheduler()
 
-    yield  # Application runs here
+    yield
 
     print("INFO: Application shutdown completed.")
 
 
-# Initialize the master FastAPI app
 app = FastAPI(
-    title="Warehouse Operations API",
+    title=settings.APP_NAME,
     description="LAN Backend API serving Raw Materials, Finished Goods, and Production systems.",
     version="2.0.0",
     lifespan=lifespan,
 )
 
-# CORS middleware for LAN client connectivity
+# ---------------------------------------------------------------------------
+# Middleware Configuration
+# ---------------------------------------------------------------------------
+
+# 1. GZip Compression: Compresses large JSON table responses (over 1 KB) by 70-80%
+app.add_middleware(GZipMiddleware, minimum_size=settings.GZIP_MINIMUM_SIZE)
+
+# 2. CORS: Permits all workstations on the office LAN to communicate with the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -68,7 +76,7 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Mount Business Domain APIs
+# Router Mounting
 # ---------------------------------------------------------------------------
 
 # 1. Raw Materials Inventory API (Active)
@@ -85,5 +93,10 @@ app.include_router(rm_router)
 
 @app.get("/", tags=["Health Check"])
 def root():
-    """Basic health check route verifying that the API server is active on the LAN."""
-    return {"status": "online", "message": "Warehouse Operations API is operational"}
+    """Basic ping route verifying the server is active on the local network."""
+    return {
+        "status": "online",
+        "database": "mbpi_erp_db",
+        "schema": settings.DB_SCHEMA,
+        "compression": "gzip_enabled"
+    }

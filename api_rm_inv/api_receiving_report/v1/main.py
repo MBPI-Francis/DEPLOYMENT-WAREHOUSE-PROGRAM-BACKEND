@@ -1,13 +1,4 @@
-from sqlalchemy.orm import Session
+"""Backward-compatible re-exports from core.base."""
+from core.base import BaseService as AppService, BaseRepository as AppCRUD
 
-class DBSessionMixin:
-    def __init__(self, db: Session):
-        self.db = db
-
-
-class AppService(DBSessionMixin):
-    pass
-
-
-class AppCRUD(DBSessionMixin):
-    pass
+__all__ = ["AppService", "AppCRUD"]

@@ -1,8 +1,8 @@
 """
-Database Engine and Session Management with Schema Support.
+Database Engine and Session Management with High-Concurrency Pooling.
 
-Configures connection pooling, request-scoped sessions, and binds
-all ORM entities to the dedicated 'schema_whrm' PostgreSQL schema.
+Configures connection pooling with pre-ping validation, automatic recycling,
+and binds all ORM entities to the dedicated 'schema_whrm' PostgreSQL schema.
 """
 
 from typing import Generator
@@ -13,12 +13,14 @@ from core.config import settings
 # ---------------------------------------------------------------------------
 # Engine Configuration
 # ---------------------------------------------------------------------------
-# -csearch_path tells PostgreSQL to look in schema_whrm first for any table/view
+# Configured to support dozens of concurrent LAN client applications
 engine = create_engine(
     settings.DATABASE_URL,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_pre_ping=True,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE,
+    pool_pre_ping=True,  # Discards dropped/dead connections automatically
     connect_args={
         "options": f"-csearch_path={settings.DB_SCHEMA},public"
     }
@@ -36,10 +38,7 @@ Base = declarative_base(metadata=metadata)
 
 
 def ensure_schema_exists():
-    """
-    Guarantees that the target schema exists in PostgreSQL before creating tables.
-    Executes 'CREATE SCHEMA IF NOT EXISTS schema_whrm;'.
-    """
+    """Guarantees that the target schema exists in PostgreSQL before creating tables."""
     with engine.connect() as connection:
         connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {settings.DB_SCHEMA};"))
         connection.commit()
@@ -47,7 +46,7 @@ def ensure_schema_exists():
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Yields a database session scoped to a single request."""
+    """Yields a database session scoped to a single request lifecycle."""
     db = SessionLocal()
     try:
         yield db

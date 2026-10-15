@@ -265,15 +265,57 @@ class PrepIntegrationService(BaseService):
     # 2. Ledger Maintenance Services (Restored CRUD)
     # -----------------------------------------------------------------------
 
+    def _resolve_codes_to_uuids(
+            self,
+            rm_code: str,
+            wh_number: str,
+            status_name: str
+    ) -> tuple[UUID, UUID, UUID]:
+        """
+        Resolves unique business keys (rm_code, wh_number, status_name) into database UUIDs.
+        Raises HTTP 422 if any identifier does not exist in schema_whrm.
+        """
+        # 1. Resolve Raw Material
+        material = self.crud.resolve_raw_material(rm_code)
+        if not material:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Raw Material with code '{rm_code}' does not exist in the inventory catalog."
+            )
+
+        # 2. Resolve Warehouse
+        warehouse = self.crud.resolve_warehouse(wh_number)
+        if not warehouse:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Warehouse with number/name '{wh_number}' does not exist."
+            )
+
+        # 3. Resolve Quality Status
+        status_record = self.crud.resolve_status(status_name)
+        if not status_record:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Quality status '{status_name}' does not exist in the status lookup table."
+            )
+
+        return material.id, warehouse.id, status_record.id
+
+
     def create_preparation_entry(self, payload: TempPreparationFormCreate) -> TempPreparationForm:
-        """Manually creates a preparation deduction entry in schema_whrm."""
-        rm_id, wh_id, st_id = self._resolve_foreign_keys(
-            rm_code=payload.rm_code, rm_code_id=payload.rm_code_id,
-            wh_number=payload.wh_number, warehouse_id=payload.warehouse_id,
-            status_name=payload.status_name, status_id=payload.status_id
+        """
+        Creates a manual preparation deduction in schema_whrm.tbl_preparation_forms.
+        Resolves rm_code, wh_number, and status_name into UUIDs automatically.
+        """
+        rm_id, wh_id, st_id = self._resolve_codes_to_uuids(
+            rm_code=payload.rm_code,
+            wh_number=payload.wh_number,
+            status_name=payload.status_name
         )
 
-        total_issued = (Decimal(str(payload.qty_prepared)) + Decimal(str(payload.add_qty or 0))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        # Total issued formula for stock deduction views: qty_prepared + add_qty
+        issued_raw = Decimal(str(payload.qty_prepared)) + Decimal(str(payload.add_qty or 0))
+        total_issued = issued_raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         record = TempPreparationForm(
             rm_code_id=rm_id,
@@ -297,36 +339,37 @@ class PrepIntegrationService(BaseService):
         self.db.refresh(record)
         return record
 
-    def get_active_preparation_list(self) -> List[dict]:
-        """Returns active deduction records for desktop grid displays."""
-        return self.crud.list_active_preparation_records()
-
-    def get_deleted_preparation_list(self) -> List[dict]:
-        """Returns soft-deleted deduction records."""
-        return self.crud.list_deleted_preparation_records()
-
-    def get_historical_preparation_list(self, record_id: Optional[str] = None) -> List[dict]:
-        """Returns historical computed deduction records."""
-        return self.crud.list_historical_preparation_records(record_id)
-
     def update_preparation_entry(self, form_id: UUID, payload: TempPreparationFormUpdate) -> List[dict]:
-        """Updates an existing deduction entry and returns the updated active list."""
+        """
+        Updates an existing preparation form entry using human codes and returns the refreshed active list.
+        """
         record = self.crud.get_preparation_by_id(form_id)
         if not record or record.is_deleted:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preparation Form record not found or already deleted.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Preparation Form record not found or already deleted."
+            )
 
-        # Update Foreign Keys if provided
-        if payload.rm_code or payload.rm_code_id:
-            rm_id, _, _ = self._resolve_foreign_keys(rm_code=payload.rm_code, rm_code_id=payload.rm_code_id, wh_number="1", status_name="good")
-            record.rm_code_id = rm_id
+        # Update Material if new code provided
+        if payload.rm_code:
+            material = self.crud.resolve_raw_material(payload.rm_code)
+            if not material:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Material '{payload.rm_code}' not found.")
+            record.rm_code_id = material.id
 
-        if payload.wh_number or payload.warehouse_id:
-            _, wh_id, _ = self._resolve_foreign_keys(rm_code=record.rm_code.rm_code, wh_number=payload.wh_number, warehouse_id=payload.warehouse_id, status_name="good")
-            record.warehouse_id = wh_id
+        # Update Warehouse if new number provided
+        if payload.wh_number:
+            wh = self.crud.resolve_warehouse(payload.wh_number)
+            if not wh:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Warehouse '{payload.wh_number}' not found.")
+            record.warehouse_id = wh.id
 
-        if payload.status_name or payload.status_id:
-            _, _, st_id = self._resolve_foreign_keys(rm_code=record.rm_code.rm_code, wh_number="1", status_name=payload.status_name, status_id=payload.status_id)
-            record.status_id = st_id
+        # Update Status if new name provided
+        if payload.status_name:
+            st = self.crud.resolve_status(payload.status_name)
+            if not st:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Status '{payload.status_name}' not found.")
+            record.status_id = st.id
 
         if payload.ref_number is not None:
             record.ref_number = payload.ref_number.strip()
@@ -349,6 +392,18 @@ class PrepIntegrationService(BaseService):
 
         self.db.commit()
         return self.get_active_preparation_list()
+
+    def get_active_preparation_list(self) -> List[dict]:
+        """Returns active deduction records for desktop grid displays."""
+        return self.crud.list_active_preparation_records()
+
+    def get_deleted_preparation_list(self) -> List[dict]:
+        """Returns soft-deleted deduction records."""
+        return self.crud.list_deleted_preparation_records()
+
+    def get_historical_preparation_list(self, record_id: Optional[str] = None) -> List[dict]:
+        """Returns historical computed deduction records."""
+        return self.crud.list_historical_preparation_records(record_id)
 
     def soft_delete_preparation_entry(self, form_id: UUID) -> List[dict]:
         """Soft-deletes an entry and returns the updated active list."""

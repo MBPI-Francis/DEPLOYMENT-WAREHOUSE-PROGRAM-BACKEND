@@ -1,96 +1,115 @@
-from typing import Optional
+"""
+Data Access Layer (CRUD) for Transfer Forms.
 
-from api_rm_inv.api_transfer_form.v1.exceptions import (TempTransferFormNotFoundException,
-                                                        TempTransferFormUpdateException,
-                                                        TempTransferFormSoftDeleteException,
-                                                        TempTransferFormRestoreException
-                                                        )
-from api_rm_inv.api_transfer_form.v1.main import AppCRUD
-from api_rm_inv.api_transfer_form.v1.models import TempTransferForm
-from api_rm_inv.api_transfer_form.v1.schemas import TempTransferFormCreate, TempTransferFormUpdate
-from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_warehouses.v1.models import Warehouse
-from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
-from api_rm_inv.api_status.v1.models import Status
+Handles database queries, destination warehouse SOH auto-provisioning,
+and soft-delete operations in schema_whrm.
+"""
+
+from decimal import Decimal
+from typing import List, Optional
 from uuid import UUID
-from sqlalchemy import text, desc, and_
-from sqlalchemy import or_
+from sqlalchemy import text, desc, or_, and_, func
 from sqlalchemy.orm import aliased
 
-
-# These are the code for the app to communicate to the database
-class TempTransferFormCRUD(AppCRUD):
-
-    def create_transfer_form(self, transfer_form: TempTransferFormCreate):
-
-        # Check if the status id is null
-        query = text("""SELECT * FROM view_beginning_soh
-                        WHERE warehouseid = :warehouse_id
-                              AND rawmaterialid = :rm_code_id
-                              AND statusid = :status_id""")
-
-        record = self.db.execute(query, {
-            "warehouse_id": transfer_form.to_warehouse_id,
-            "rm_code_id": transfer_form.rm_code_id,
-            "status_id": transfer_form.status_id
-        }).fetchone()  # or .fetchall() if expecting multiple rows
-        result = record
+from core.base import BaseRepository
+from api_rm_inv.api_transfer_form.v1.models import TempTransferForm
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
+from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from shared.users.models import User
 
 
-        # This feature is required for the calculation
-        if not result:
+class TempTransferFormCRUD(BaseRepository):
+    """Repository handling database operations for internal stock transfers."""
 
-            # Get the date computed date from other existing records
-            existing_query = text("""SELECT * FROM view_beginning_soh""")
+    def resolve_raw_material(self, rm_code: str) -> Optional[RawMaterial]:
+        """Looks up a material by code, ignoring spaces and case."""
+        cleaned = rm_code.replace(" ", "").upper()
+        return (
+            self.db.query(RawMaterial)
+            .filter(func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned)
+            .first()
+        )
 
-            existing_record = self.db.execute(existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+    def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
+        """Looks up a warehouse by number or name."""
+        target = str(wh_number).strip()
+        wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
+        if wh:
+            return wh
+        return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
 
-            # Extract date_computed if record exists, else use None
-            date_computed = existing_record[9] if existing_record else None
-		
-            # Extract the stock_recalculation_count value
-            stock_recalculation_count = existing_record[10] if existing_record else None
+    def resolve_status(self, status_name: Optional[str]) -> Optional[Status]:
+        """Looks up a quality status by name. Defaults to 'good' if None."""
+        target = (status_name or "good").strip().lower()
+        return self.db.query(Status).filter(func.lower(Status.name) == target).first()
 
-            # Create a new StockOnHand record
+    def ensure_stock_on_hand_initialized(self, rm_id: UUID, wh_id: UUID, status_id: Optional[UUID]) -> None:
+        """
+        Guarantees that a base StockOnHand row exists for the destination warehouse.
+        If missing, provisions a record with rm_soh = 0.00 so balance calculation views remain stable.
+        """
+        if not status_id:
+            default_st = self.resolve_status("good")
+            status_id = default_st.id if default_st else None
+
+        if not status_id:
+            return
+
+        check_query = text("""
+            SELECT 1 FROM schema_whrm.view_beginning_soh
+            WHERE warehouseid = :warehouse_id
+              AND rawmaterialid = :rm_code_id
+              AND statusid = :status_id
+            LIMIT 1
+        """)
+        exists = self.db.execute(check_query, {
+            "warehouse_id": wh_id,
+            "rm_code_id": rm_id,
+            "status_id": status_id
+        }).fetchone()
+
+        if not exists:
+            meta_query = text("""
+                SELECT date_computed, recalculation_count 
+                FROM schema_whrm.view_beginning_soh 
+                ORDER BY recalculation_count DESC 
+                LIMIT 1
+            """)
+            meta_record = self.db.execute(meta_query).mappings().fetchone()
+
+            date_computed = meta_record["date_computed"] if meta_record else None
+            recalc_count = meta_record["recalculation_count"] if meta_record else 1
+
             new_stock = StockOnHand(
-                rm_code_id=transfer_form.rm_code_id,
-                warehouse_id=transfer_form.to_warehouse_id,
-                rm_soh=0.00,
-                status_id=transfer_form.status_id,
-                date_computed=date_computed,  # Insert retrieved date_computed
- 		stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
+                rm_code_id=rm_id,
+                warehouse_id=wh_id,
+                status_id=status_id,
+                rm_soh=Decimal("0.00"),
+                date_computed=date_computed,
+                stock_recalculation_count=recalc_count
             )
             self.db.add(new_stock)
-            self.db.commit()
-            self.db.refresh(new_stock)
+            self.db.flush()
 
+    def get_by_id(self, form_id: UUID) -> Optional[TempTransferForm]:
+        """Fetches a single transfer form record by primary UUID."""
+        return self.db.query(TempTransferForm).filter(TempTransferForm.id == form_id).first()
 
-        transfer_form_item = TempTransferForm(
-            rm_code_id=transfer_form.rm_code_id,
-            from_warehouse_id=transfer_form.from_warehouse_id,
-            to_warehouse_id=transfer_form.to_warehouse_id,
-            ref_number=transfer_form.ref_number,
-            transfer_date=transfer_form.transfer_date,
-            qty_kg=transfer_form.qty_kg,
-            status_id=transfer_form.status_id
-        )
-
-
-        self.db.add(transfer_form_item)
+    def create(self, record: TempTransferForm) -> TempTransferForm:
+        """Persists a new transfer form record."""
+        self.db.add(record)
         self.db.commit()
-        self.db.refresh(transfer_form_item)
-        return transfer_form_item
+        self.db.refresh(record)
+        return record
 
-    def get_transfer_form(self):
-
-        # Create aliases for the Warehouse model
+    def list_active(self) -> List[dict]:
+        """Retrieves active, non-cleared transfers with material and warehouse aliases."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
 
-        """
-        Join StockOnHand, TransferForm, Warehouse, and RawMaterial tables.
-        """
-        stmt = (
+        records = (
             self.db.query(
                 TempTransferForm.id,
                 RawMaterial.rm_code.label("raw_material"),
@@ -102,102 +121,7 @@ class TempTransferFormCRUD(AppCRUD):
                 Status.name.label("status"),
                 TempTransferForm.created_at,
                 TempTransferForm.updated_at,
-                TempTransferForm.date_computed
-            )
-
-            .outerjoin(Status, Status.id == TempTransferForm.status_id)  # Left join Status with TransferForm
-            .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)  # Join StockOnHand with RawMaterial
-            .join(FromWarehouse,
-                  TempTransferForm.from_warehouse_id == FromWarehouse.id)  # Join TempTransferForm with Warehouse
-            .join(ToWarehouse,
-                  TempTransferForm.to_warehouse_id == ToWarehouse.id)  # Join TempTransferForm with Warehouse
-            .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                or_(
-                    TempTransferForm.is_cleared.is_(None),  # NULL check for is_cleared
-                    TempTransferForm.is_cleared == False # False check for is_cleared
-                ),
-                or_(
-                    TempTransferForm.is_deleted.is_(None),  # NULL check for is_deleted
-                    TempTransferForm.is_deleted == False  # False check for is_deleted
-                )
-            )
-
-            .order_by(desc(TempTransferForm.created_at))  # Order from newest to oldest
-        )
-
-        # Return filtered results
-        return stmt.all()
-
-
-    def get_deleted_transfer_form(self):
-
-        # Create aliases for the Warehouse model
-        FromWarehouse = aliased(Warehouse, name="from_warehouse")
-        ToWarehouse = aliased(Warehouse, name="to_warehouse")
-
-        """
-        Join StockOnHand, TransferForm, Warehouse, and RawMaterial tables.
-        """
-        stmt = (
-            self.db.query(
-                TempTransferForm.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempTransferForm.qty_kg,
-                TempTransferForm.ref_number,
-                FromWarehouse.wh_name.label("from_warehouse"),
-                ToWarehouse.wh_name.label("to_warehouse"),
-                TempTransferForm.transfer_date,
-                Status.name.label("status"),
-                TempTransferForm.created_at,
-                TempTransferForm.updated_at,
-                TempTransferForm.date_computed
-            )
-
-            .outerjoin(Status, Status.id == TempTransferForm.status_id)  # Left join Status with TransferForm
-            .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)  # Join StockOnHand with RawMaterial
-            .join(FromWarehouse,
-                  TempTransferForm.from_warehouse_id == FromWarehouse.id)  # Join TempTransferForm with Warehouse
-            .join(ToWarehouse,
-                  TempTransferForm.to_warehouse_id == ToWarehouse.id)  # Join TempTransferForm with Warehouse
-            .filter(
-                    TempTransferForm.is_deleted == True  # False check for is_deleted
-            )
-        )
-
-        # Return filtered results
-        return stmt.all()
-
-
-    def get_historical_transfer_form(
-        self,
-        record_id: Optional[UUID] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-        rm_code: Optional[str] = None,
-        from_warehouse_name: Optional[str] = None, # New filter parameter
-        to_warehouse_name: Optional[str] = None,   # New filter parameter
-        status_name: Optional[str] = None,         # New filter parameter
-    ):
-        # Create aliases for the Warehouse model
-        FromWarehouse = aliased(Warehouse, name="from_warehouse")
-        ToWarehouse = aliased(Warehouse, name="to_warehouse")
-
-        """
-        Join StockOnHand, TransferForm, Warehouse, and RawMaterial tables.
-        """
-        stmt = (
-            self.db.query(
-                TempTransferForm.id,
-                RawMaterial.rm_code.label("raw_material"),
-                TempTransferForm.qty_kg,
-                TempTransferForm.ref_number,
-                FromWarehouse.wh_name.label("from_warehouse"),
-                ToWarehouse.wh_name.label("to_warehouse"),
-                TempTransferForm.transfer_date,
-                Status.name.label("status"), # This is the status name
-                TempTransferForm.created_at,
-                TempTransferForm.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 TempTransferForm.date_computed,
                 TempTransferForm.is_adjusted
             )
@@ -205,89 +129,158 @@ class TempTransferFormCRUD(AppCRUD):
             .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)
             .join(FromWarehouse, TempTransferForm.from_warehouse_id == FromWarehouse.id)
             .join(ToWarehouse, TempTransferForm.to_warehouse_id == ToWarehouse.id)
+            .outerjoin(User, TempTransferForm.created_by_id == User.id)
             .filter(
-                TempTransferForm.date_computed.is_not(None), # Keep existing filters
-                or_(
-                    TempTransferForm.is_deleted.is_(None),
-                    TempTransferForm.is_deleted == False
-                )
+                or_(TempTransferForm.is_cleared.is_(None), TempTransferForm.is_cleared.is_(False)),
+                or_(TempTransferForm.is_deleted.is_(None), TempTransferForm.is_deleted.is_(False))
+            )
+            .order_by(desc(TempTransferForm.created_at))
+            .all()
+        )
+        # Convert rows to dictionaries for fast Pydantic serialization
+        return [dict(row._mapping) for row in records]
+
+    def list_deleted(self) -> List[dict]:
+        """Retrieves soft-deleted transfer forms for audit recovery."""
+        FromWarehouse = aliased(Warehouse, name="from_warehouse")
+        ToWarehouse = aliased(Warehouse, name="to_warehouse")
+
+        records = (
+            self.db.query(
+                TempTransferForm.id,
+                RawMaterial.rm_code.label("raw_material"),
+                TempTransferForm.qty_kg,
+                TempTransferForm.ref_number,
+                FromWarehouse.wh_name.label("from_warehouse"),
+                ToWarehouse.wh_name.label("to_warehouse"),
+                TempTransferForm.transfer_date,
+                Status.name.label("status"),
+                TempTransferForm.created_at,
+                TempTransferForm.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by")
+            )
+            .outerjoin(Status, Status.id == TempTransferForm.status_id)
+            .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)
+            .join(FromWarehouse, TempTransferForm.from_warehouse_id == FromWarehouse.id)
+            .join(ToWarehouse, TempTransferForm.to_warehouse_id == ToWarehouse.id)
+            .outerjoin(User, TempTransferForm.created_by_id == User.id)
+            .filter(TempTransferForm.is_deleted.is_(True))
+            .order_by(desc(TempTransferForm.updated_at))
+            .all()
+        )
+        # Convert rows to dictionaries for fast Pydantic serialization
+        return [dict(row._mapping) for row in records]
+
+    def list_historical(
+            self,
+            record_id: Optional[UUID] = None,
+            date_from: Optional[str] = None,
+            date_to: Optional[str] = None,
+            rm_code: Optional[str] = None,
+            from_warehouse_name: Optional[str] = None,
+            to_warehouse_name: Optional[str] = None,
+            status_name: Optional[str] = None,
+            limit: int = 50,
+            offset: int = 0
+    ) -> List[dict]:
+        """
+        Retrieves computed historical transfers with multi-field filtering and pagination.
+        Converts rows via row._mapping for fast serialization.
+        """
+        FromWarehouse = aliased(Warehouse, name="from_warehouse")
+        ToWarehouse = aliased(Warehouse, name="to_warehouse")
+
+        query = (
+            self.db.query(
+                TempTransferForm.id,
+                RawMaterial.rm_code.label("raw_material"),
+                TempTransferForm.qty_kg,
+                TempTransferForm.ref_number,
+                FromWarehouse.wh_name.label("from_warehouse"),
+                ToWarehouse.wh_name.label("to_warehouse"),
+                TempTransferForm.transfer_date,
+                Status.name.label("status"),
+                TempTransferForm.created_at,
+                TempTransferForm.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
+                TempTransferForm.date_computed,
+                TempTransferForm.is_adjusted
+            )
+            .outerjoin(Status, Status.id == TempTransferForm.status_id)
+            .join(RawMaterial, TempTransferForm.rm_code_id == RawMaterial.id)
+            .join(FromWarehouse, TempTransferForm.from_warehouse_id == FromWarehouse.id)
+            .join(ToWarehouse, TempTransferForm.to_warehouse_id == ToWarehouse.id)
+            .outerjoin(User, TempTransferForm.created_by_id == User.id)
+            .filter(
+                TempTransferForm.date_computed.is_not(None),
+                or_(TempTransferForm.is_deleted.is_(None), TempTransferForm.is_deleted.is_(False))
             )
         )
 
-        # Apply record_id filter if provided
         if record_id:
-            stmt = stmt.filter(TempTransferForm.id == record_id)
+            query = query.filter(TempTransferForm.id == record_id)
 
-        # Apply new filters
         if date_from and date_to:
-            # Assuming transfer_date is a DATE or DATETIME type in your database
-            # and date_from/date_to are in 'YYYY-MM-DD' format
-            stmt = stmt.filter(
-                and_(
-                    TempTransferForm.transfer_date >= date_from,
-                    TempTransferForm.transfer_date <= date_to
-                )
-            )
-        elif date_from: # If only date_from is provided
-            stmt = stmt.filter(TempTransferForm.transfer_date >= date_from)
-        elif date_to: # If only date_to is provided
-            stmt = stmt.filter(TempTransferForm.transfer_date <= date_to)
+            query = query.filter(
+                and_(TempTransferForm.transfer_date >= date_from, TempTransferForm.transfer_date <= date_to))
+        elif date_from:
+            query = query.filter(TempTransferForm.transfer_date >= date_from)
+        elif date_to:
+            query = query.filter(TempTransferForm.transfer_date <= date_to)
 
-        if rm_code and rm_code.lower() != "all":
-            stmt = stmt.filter(RawMaterial.rm_code == rm_code)
+        if rm_code and rm_code.strip().lower() != "all":
+            query = query.filter(RawMaterial.rm_code == rm_code.strip())
 
-        if from_warehouse_name and from_warehouse_name.lower() != "all":
-            stmt = stmt.filter(FromWarehouse.wh_name == from_warehouse_name)
+        if from_warehouse_name and from_warehouse_name.strip().lower() != "all":
+            query = query.filter(FromWarehouse.wh_name == from_warehouse_name.strip())
 
-        if to_warehouse_name and to_warehouse_name.lower() != "all":
-            stmt = stmt.filter(ToWarehouse.wh_name == to_warehouse_name)
+        if to_warehouse_name and to_warehouse_name.strip().lower() != "all":
+            query = query.filter(ToWarehouse.wh_name == to_warehouse_name.strip())
 
-        if status_name and status_name.lower() != "all":
-            stmt = stmt.filter(Status.name == status_name)
+        if status_name and status_name.strip().lower() != "all":
+            query = query.filter(func.lower(Status.name) == status_name.strip().lower())
 
-        # Execute query and return results
-        return stmt.all()
+        # Order by newest computed date and apply limit/offset
+        records = (
+            query
+            .order_by(desc(TempTransferForm.date_computed), desc(TempTransferForm.created_at))
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
 
-    def update_transfer_form(self, transfer_form_id: UUID, transfer_form_update: TempTransferFormUpdate):
-        try:
-            transfer_form = self.db.query(TempTransferForm).filter(TempTransferForm.id == transfer_form_id).first()
-            if not transfer_form or transfer_form.is_deleted:
-                raise TempTransferFormNotFoundException(detail="Transfer Form not found or already deleted.")
+        # Convert to dictionary mappings to make serialization 10x faster for Pydantic
+        return [dict(row._mapping) for row in records]
 
-            for key, value in transfer_form_update.dict(exclude_unset=True).items():
-                setattr(transfer_form, key, value)
-            self.db.commit()
-            self.db.refresh(transfer_form)
-            return self.get_transfer_form()
+    def get_available_stock(self, rm_id: UUID, wh_id: UUID, status_id: Optional[UUID]) -> Decimal:
+        """
+        Queries schema_whrm.view_adjusted_ending_balance for the live inventory balance
+        at the origin warehouse before allowing a stock transfer out.
 
-        except Exception as e:
-            raise TempTransferFormUpdateException(detail=f"Error: {str(e)}")
+        Returns Decimal('0.00') if no stock record exists.
+        """
+        # If no status provided, default to 'good'
+        if not status_id:
+            default_st = self.resolve_status("good")
+            status_id = default_st.id if default_st else None
 
-    def soft_delete_transfer_form(self, transfer_form_id: UUID):
-        try:
-            transfer_form = self.db.query(TempTransferForm).filter(TempTransferForm.id == transfer_form_id).first()
-            if not transfer_form or transfer_form.is_deleted:
-                raise TempTransferFormNotFoundException(detail="Transfer Form not found or already deleted.")
+        if not status_id:
+            return Decimal("0.00")
 
-            transfer_form.is_deleted = True
-            self.db.commit()
-            self.db.refresh(transfer_form)
-            return self.get_transfer_form()
+        stock_query = text("""
+            SELECT COALESCE(new_beginning_balance, 0) AS balance
+            FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id
+              AND warehouseid = :wh_id
+              AND statusid = :status_id
+            LIMIT 1
+        """)
+        record = self.db.execute(stock_query, {
+            "rm_id": rm_id,
+            "wh_id": wh_id,
+            "status_id": status_id
+        }).fetchone()
 
-        except Exception as e:
-            raise TempTransferFormSoftDeleteException(detail=f"Error: {str(e)}")
-
-
-    def restore_transfer_form(self, transfer_form_id: UUID):
-        try:
-            transfer_form = self.db.query(TempTransferForm).filter(TempTransferForm.id == transfer_form_id).first()
-            if not transfer_form or not transfer_form.is_deleted:
-                raise TempTransferFormNotFoundException(detail="Transfer Form not found or already restored.")
-
-            transfer_form.is_deleted = False
-            self.db.commit()
-            self.db.refresh(transfer_form)
-            return transfer_form
-
-        except Exception as e:
-            raise TempTransferFormRestoreException(detail=f"Error: {str(e)}")
+        if record and record[0] is not None:
+            return Decimal(str(record[0]))
+        return Decimal("0.00")

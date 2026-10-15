@@ -2,7 +2,7 @@
 Application Configuration Module.
 
 Centralizes environment variables, database connection strings,
-and PostgreSQL schema definitions.
+connection pool parameters, and network compression thresholds.
 """
 
 import os
@@ -12,26 +12,29 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Settings:
     """
-    Application runtime configuration.
-
-    Attributes:
-        DATABASE_URL: PostgreSQL connection string pointing to mbpi_erp_db.
-        DB_SCHEMA: Target PostgreSQL schema name (schema_whrm).
+    Application runtime configuration optimized for multi-client LAN operations.
     """
-    APP_NAME: str = "Plant Operations API"
+    APP_NAME: str = "MBPI ERP - Warehouse Operations API"
 
-    # 1. Connected to mbpi_erp_db (adjust host/port/credentials as needed)
+    # PostgreSQL Connection String pointing to mbpi_erp_db
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
         "postgresql://postgres:mbpi@localhost:5433/mbpi_erp_db"
     )
 
-    # 2. Target schema dedicated to Raw Material Warehouse
+    # Dedicated schema for Raw Material Warehouse
     DB_SCHEMA: str = os.getenv("DB_SCHEMA", "schema_whrm")
 
-    # Connection pool tuning
-    DB_POOL_SIZE: int = 15
-    DB_MAX_OVERFLOW: int = 10
+    # -----------------------------------------------------------------------
+    # Database Connection Pool Tuning (High-Concurrency LAN)
+    # -----------------------------------------------------------------------
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))        # Steady persistent connections
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))  # Burst connections for traffic spikes
+    DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))  # Wait up to 30s before timing out
+    DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))# Reconnect after 30 mins to avoid stale sockets
+
+    # Network Compression Threshold
+    GZIP_MINIMUM_SIZE: int = 1000  # Compress any response larger than 1 KB
 
     # Backup configuration
     BACKUP_FOLDER: str = os.getenv(

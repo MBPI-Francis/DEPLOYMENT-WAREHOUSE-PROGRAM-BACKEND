@@ -1,9 +1,10 @@
 """
 Pydantic Schemas for Preparation Form Module.
 
-Handles two operational workflows:
-1. Floor Traveler Integration: Worksheet lookups and atomic batch posting.
-2. Ledger Maintenance CRUD: Direct preparation viewing, editing, soft-deleting, and restoring.
+Provides DTOs for:
+1. Traveler Integration: Worksheet lookups and atomic batch posting.
+2. Ledger Maintenance CRUD: Manual deduction records using human-friendly codes
+   (rm_code, wh_number, status_name) instead of database UUIDs.
 """
 
 from datetime import date, datetime
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 def _quantize_two_places(value: Optional[Decimal]) -> Optional[Decimal]:
-    """Rounds quantities to exactly 2 decimal places using standard half-up rounding."""
+    """Rounds values to exactly 2 decimal places using standard half-up commercial rounding."""
     if value is None:
         return None
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -112,36 +113,31 @@ class PrepSubmissionResponse(BaseModel):
 
 
 # ===========================================================================
-# 2. Ledger CRUD DTOs (Restored & Upgraded with Human Identifiers)
+# 2. Ledger Maintenance DTOs (Human Codes Only - No UUIDs Required)
 # ===========================================================================
 
 class TempPreparationFormCreate(BaseModel):
     """
     Payload for manually creating a preparation deduction record.
-    Accepts human codes (rm_code, wh_number, status_name) OR internal UUIDs.
+    The client passes only unique human-friendly codes. The backend resolves the UUIDs.
     """
-    ref_number: str = Field(..., max_length=50, description="Reference or Form Number")
-    prod_lot_no: Optional[str] = Field(None, max_length=128, description="Production Lot Number")
-    preparation_date: date = Field(default_factory=date.today)
+    ref_number: str = Field(..., max_length=50, description="Reference or Prep Form Number (e.g. 'PREP-101')")
+    prod_lot_no: Optional[str] = Field(None, max_length=128, description="Production Lot Number (e.g. '0366Y-0420Y')")
+    preparation_date: date = Field(default_factory=date.today, description="Transaction deduction date")
 
-    # Human codes (preferred) with UUID fallbacks
-    rm_code: Optional[str] = Field(None, description="Material code (e.g. 'RM-1001')")
-    rm_code_id: Optional[UUID] = None
+    # Pure human-readable business keys (No UUIDs!)
+    rm_code: str = Field(..., min_length=1, max_length=50, description="Unique material code (e.g. 'RM-1001')")
+    wh_number: str = Field("1", description="Unique warehouse number (e.g. '1' or '2')")
+    status_name: str = Field("good", description="Unique quality status name (e.g. 'good', 'held : reject')")
 
-    wh_number: Optional[str] = Field("1", description="Warehouse number (e.g. '1')")
-    warehouse_id: Optional[UUID] = None
+    # Quantities & Floor Details
+    qty_prepared: Decimal = Field(..., ge=0, description="Actual physical quantity issued")
+    qty_return: Decimal = Field(Decimal("0.00"), ge=0, description="Quantity returned to warehouse")
+    qty_required: Optional[Decimal] = Field(Decimal("0.00"), ge=0, description="Planned recipe target quantity")
+    add_qty: Optional[Decimal] = Field(Decimal("0.00"), ge=0, description="Additional quantity added")
+    rm_lot_no: Optional[str] = Field(None, max_length=50, description="Supplier chemical lot number")
 
-    status_name: Optional[str] = Field("good", description="Quality status (e.g. 'good')")
-    status_id: Optional[UUID] = None
-
-    # Quantities
-    qty_prepared: Decimal = Field(..., ge=0, description="Issued quantity")
-    qty_return: Decimal = Field(Decimal("0.00"), ge=0, description="Returned quantity")
-    qty_required: Optional[Decimal] = Field(Decimal("0.00"), ge=0, description="Planned recipe quantity")
-    add_qty: Optional[Decimal] = Field(Decimal("0.00"), ge=0, description="Additional quantity")
-    rm_lot_no: Optional[str] = Field(None, max_length=50, description="Supplier chemical lot")
-
-    created_by_id: Optional[UUID] = None
+    created_by_id: Optional[UUID] = Field(None, description="UUID of the clerk recording the entry (optional)")
 
     @field_validator("qty_prepared", "qty_return", "qty_required", "add_qty", mode="before")
     @classmethod
@@ -151,21 +147,17 @@ class TempPreparationFormCreate(BaseModel):
 
 class TempPreparationFormUpdate(BaseModel):
     """
-    Payload for updating an existing preparation deduction record.
-    All fields are optional; supply only what requires correction.
+    Payload for modifying an existing preparation entry.
+    All fields are optional; supply only what needs to be changed.
     """
     ref_number: Optional[str] = Field(None, max_length=50)
     prod_lot_no: Optional[str] = Field(None, max_length=128)
     preparation_date: Optional[date] = None
 
-    rm_code: Optional[str] = None
-    rm_code_id: Optional[UUID] = None
-
-    wh_number: Optional[str] = None
-    warehouse_id: Optional[UUID] = None
-
-    status_name: Optional[str] = None
-    status_id: Optional[UUID] = None
+    # Optional human-readable keys for changing assigned material, warehouse, or status
+    rm_code: Optional[str] = Field(None, max_length=50)
+    wh_number: Optional[str] = Field(None, max_length=50)
+    status_name: Optional[str] = Field(None, max_length=100)
 
     qty_prepared: Optional[Decimal] = Field(None, ge=0)
     qty_return: Optional[Decimal] = Field(None, ge=0)
@@ -188,15 +180,15 @@ class TempPreparationFormResponse(BaseModel):
     id: UUID
     ref_number: str
     prod_lot_no: Optional[str] = None
-    raw_material: str  # Human material code
+    raw_material: str  # rm_code
     rm_name: Optional[str] = None
     wh_name: str
     wh_number: Optional[str] = None
     status: str
+    qty_required: Decimal
     qty_prepared: Decimal
+    add_qty: Decimal
     qty_return: Decimal
-    qty_required: Optional[Decimal] = Decimal("0.00")
-    add_qty: Optional[Decimal] = Decimal("0.00")
     rm_lot_no: Optional[str] = None
     preparation_date: date
     created_at: datetime
