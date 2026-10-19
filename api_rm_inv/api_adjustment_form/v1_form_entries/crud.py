@@ -1,913 +1,323 @@
-from fastapi import HTTPException
+"""
+Data Access Layer (CRUD) for Form Entries Adjustments.
 
-from api_rm_inv.api_adjustment_form.v1_form_entries.exceptions import (AdjustmentFormNotFoundException,
-                                                                       AdjustmentFormUpdateException,
-                                                                       AdjustmentFormSoftDeleteException,
-                                                                       AdjustmentFormRestoreException
-                                                                       )
-from api_rm_inv.api_change_status_form.v1.models import TempHeldForm
-from api_rm_inv.api_outgoing_report.v1.models import TempOutgoingReport
-from api_rm_inv.api_preparation_form.v1.models import TempPreparationForm
-from api_rm_inv.api_receiving_report.v1.models import TempReceivingReport
-from api_rm_inv.api_status.v1.models import Status
-from api_rm_inv.api_adjustment_form.v1_form_entries.main import AppCRUD
-from api_rm_inv.api_adjustment_form.v1_form_entries.models import AdjustmentFormParent, AdjustmentFormCorrect
-from api_rm_inv.api_adjustment_form.v1_form_entries.schemas import AdjustmentFormCreate, AdjustmentFormUpdate
+Handles cross-table atomic updates, SOH provisioning, and joining
+all five corrected transaction types in schema_whrm.
+"""
+
+from decimal import Decimal
+from typing import List, Optional, Tuple
 from uuid import UUID
-from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
-from api_rm_inv.api_transfer_form.v1.models import TempTransferForm
-from api_rm_inv.api_warehouses.v1.models import Warehouse
-from sqlalchemy import or_, desc, text
+from sqlalchemy import text, desc, or_, and_, func
 from sqlalchemy.orm import aliased
 
-
-# These are the code for the app to communicate to the database
-class AdjustmentFormCRUD(AppCRUD):
-
-
-    def create_adjustment_form(self, adjustment_form: AdjustmentFormCreate, form: str):
-
-        # Check if the status id is null
-        query = text("""SELECT * FROM view_beginning_soh
-                                WHERE warehouseid = :warehouse_id
-                                      AND rawmaterialid = :rm_code_id
-                                      AND statusid = :status_id""")
-
-        child_record = None
-        # Step 1: Create parent record
-        parent_record = AdjustmentFormParent(
-            ref_number=adjustment_form.ref_number,
-            adjustment_date=adjustment_form.adjustment_date,
-            referenced_date=adjustment_form.referenced_date,
-            adjustment_type=adjustment_form.adjustment_type,
-            responsible_person=adjustment_form.responsible_person,
-        )
-        self.db.add(parent_record)
-        self.db.flush()  # Get parent.id without committing yet
-
-        # Step 2: Create corresponding child
-        if form == "receiving form":
-
-            record = self.db.execute(query, {
-                "warehouse_id": adjustment_form.warehouse_id,
-                "rm_code_id": adjustment_form.rm_code_id,
-                "status_id": adjustment_form.status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
-            result = record
-
-            # This feature is required for the calculation
-            if not result:
-                # Get the date computed date from other existing records
-                existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                existing_record = self.db.execute(
-                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                # Extract date_computed if record exists, else use None
-                date_computed = existing_record[9] if existing_record else None
-
-                # Extract the stock_recalculation_count value
-                stock_recalculation_count = existing_record[10] if existing_record else None
-
-                # Create a new StockOnHand record
-                new_stock = StockOnHand(
-                    rm_code_id=adjustment_form.rm_code_id,
-                    warehouse_id=adjustment_form.warehouse_id,
-                    rm_soh=0.00,
-                    status_id=adjustment_form.status_id,
-                    date_computed=date_computed,
-                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
-                )
-                self.db.add(new_stock)
-                self.db.commit()
-                self.db.refresh(new_stock)
-
-            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
-            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
-                AdjustmentFormCorrect.incorrect_receiving_id == adjustment_form.incorrect_receiving_id,
-                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
-            ).first()
-
-            if existing_correct_record:
-                # Update existing record and mark it as deleted
-                existing_correct_record.is_deleted = True
-                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
-                self.db.flush()  # Apply the update in the current transaction
+from core.base import BaseRepository
+from api_rm_inv.api_adjustment_form.v1_form_entries.models import AdjustmentFormParent, AdjustmentFormCorrect
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
+from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from shared.users.models import User
 
 
-            child_record = AdjustmentFormCorrect(
-                adjustment_parent_id=parent_record.id,
-                rm_code_id=adjustment_form.rm_code_id,
-                warehouse_id=adjustment_form.warehouse_id,
-                status_id=adjustment_form.status_id,
-                qty_kg=adjustment_form.qty_kg,
-                incorrect_receiving_id=adjustment_form.incorrect_receiving_id
+class AdjustmentFormCRUD(BaseRepository):
+    """Encapsulates all database operations for form entry corrections."""
+
+    # -----------------------------------------------------------------------
+    # Resolvers & SOH Baseline Provisioner
+    # -----------------------------------------------------------------------
+
+    def resolve_raw_material(self, rm_code: str) -> Optional[RawMaterial]:
+        """Looks up a material by code, ignoring spaces and case."""
+        cleaned = rm_code.replace(" ", "").upper()
+        return self.db.query(RawMaterial).filter(func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned).first()
+
+    def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
+        """Looks up a warehouse by number or name."""
+        target = str(wh_number).strip()
+        wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
+        if wh:
+            return wh
+        return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
+
+    def resolve_status(self, status_name: str) -> Optional[Status]:
+        """Looks up a quality status by name."""
+        return self.db.query(Status).filter(func.lower(Status.name) == status_name.strip().lower()).first()
+
+    def ensure_stock_on_hand_initialized(self, rm_id: UUID, wh_id: UUID, status_id: Optional[UUID]) -> None:
+        """
+        Guarantees that an initial SOH record exists for the given (material, warehouse, status) tuple
+        so calculation views function without errors.
+        """
+        if not status_id or not wh_id or not rm_id:
+            return
+
+        check_query = text("""
+            SELECT 1 FROM schema_whrm.view_beginning_soh
+            WHERE warehouseid = :warehouse_id
+              AND rawmaterialid = :rm_code_id
+              AND statusid = :status_id
+            LIMIT 1
+        """)
+        exists = self.db.execute(check_query, {
+            "warehouse_id": wh_id,
+            "rm_code_id": rm_id,
+            "status_id": status_id
+        }).fetchone()
+
+        if not exists:
+            meta_query = text("""
+                SELECT date_computed, recalculation_count 
+                FROM schema_whrm.view_beginning_soh 
+                ORDER BY recalculation_count DESC 
+                LIMIT 1
+            """)
+            meta_record = self.db.execute(meta_query).mappings().fetchone()
+
+            date_computed = meta_record["date_computed"] if meta_record else None
+            recalc_count = meta_record["recalculation_count"] if meta_record else 1
+
+            new_stock = StockOnHand(
+                rm_code_id=rm_id,
+                warehouse_id=wh_id,
+                status_id=status_id,
+                rm_soh=Decimal("0.00"),
+                date_computed=date_computed,
+                stock_recalculation_count=recalc_count
             )
+            self.db.add(new_stock)
+            self.db.flush()
 
-            main_record = self.db.query(TempReceivingReport).filter(
-                TempReceivingReport.id == adjustment_form.incorrect_receiving_id
-            ).first()
+    # -----------------------------------------------------------------------
+    # Stock Availability Checker
+    # -----------------------------------------------------------------------
 
-            if main_record:
-                if not main_record.is_adjusted:
-                    main_record.is_adjusted = True
-                    self.db.flush()  # Apply the change
+    def get_available_stock(self, rm_id: UUID, wh_id: UUID, status_id: UUID) -> Decimal:
+        """Queries schema_whrm.view_adjusted_ending_balance for live inventory balance."""
+        stock_query = text("""
+            SELECT COALESCE(new_beginning_balance, 0) AS balance
+            FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id
+              AND warehouseid = :wh_id
+              AND statusid = :status_id
+            LIMIT 1
+        """)
+        record = self.db.execute(stock_query, {
+            "rm_id": rm_id,
+            "wh_id": wh_id,
+            "status_id": status_id
+        }).fetchone()
 
-        elif form == "outgoing form":
+        if record and record[0] is not None:
+            return Decimal(str(record[0]))
+        return Decimal("0.00")
 
-            record = self.db.execute(query, {
-                "warehouse_id": adjustment_form.warehouse_id,
-                "rm_code_id": adjustment_form.rm_code_id,
-                "status_id": adjustment_form.status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
-            result = record
+    # -----------------------------------------------------------------------
+    # CRUD Operations
+    # -----------------------------------------------------------------------
 
-            # This feature is required for the calculation
-            if not result:
-                # Get the date computed date from other existing records
-                existing_query = text("""SELECT * FROM view_beginning_soh""")
+    def get_parent_by_id(self, parent_id: UUID) -> Optional[AdjustmentFormParent]:
+        """Fetches an adjustment header by UUID."""
+        return self.db.query(AdjustmentFormParent).filter(AdjustmentFormParent.id == parent_id).first()
 
-                existing_record = self.db.execute(
-                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
+    def get_child_by_id(self, child_id: UUID) -> Optional[AdjustmentFormCorrect]:
+        """Fetches an adjustment line item by UUID."""
+        return self.db.query(AdjustmentFormCorrect).filter(AdjustmentFormCorrect.id == child_id).first()
 
-                # Extract date_computed if record exists, else use None
-                date_computed = existing_record[9] if existing_record else None
+    def get_child_by_parent_id(self, parent_id: UUID) -> Optional[AdjustmentFormCorrect]:
+        """Fetches active line item matching parent header UUID."""
+        return self.db.query(AdjustmentFormCorrect).filter(
+            AdjustmentFormCorrect.adjustment_parent_id == parent_id,
+            AdjustmentFormCorrect.is_deleted.is_(False)
+        ).first()
 
-                # Extract the stock_recalculation_count value
-                stock_recalculation_count = existing_record[10] if existing_record else None
-
-                # Create a new StockOnHand record
-                new_stock = StockOnHand(
-                    rm_code_id=adjustment_form.rm_code_id,
-                    warehouse_id=adjustment_form.warehouse_id,
-                    rm_soh=0.00,
-                    status_id=adjustment_form.status_id,
-                    date_computed=date_computed,
-                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
-                )
-                self.db.add(new_stock)
-                self.db.commit()
-                self.db.refresh(new_stock)
-
-            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
-            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
-                AdjustmentFormCorrect.incorrect_outgoing_id == adjustment_form.incorrect_outgoing_id,
-                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
-            ).first()
-
-            if existing_correct_record:
-                # Update existing record and mark it as deleted
-                existing_correct_record.is_deleted = True
-                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
-                self.db.flush()  # Apply the update in the current transaction
-
-
-            child_record = AdjustmentFormCorrect(
-                adjustment_parent_id=parent_record.id,
-                rm_code_id=adjustment_form.rm_code_id,
-                warehouse_id=adjustment_form.warehouse_id,
-                status_id=adjustment_form.status_id,
-                qty_kg=adjustment_form.qty_kg,
-                incorrect_outgoing_id=adjustment_form.incorrect_outgoing_id
-            )
-
-            main_record = self.db.query(TempOutgoingReport).filter(
-                TempOutgoingReport.id == adjustment_form.incorrect_outgoing_id
-            ).first()
-
-            if main_record:
-                if not main_record.is_adjusted:
-                    main_record.is_adjusted = True
-                    self.db.flush()  # Apply the change
-
-        elif form == "preparation form":
-            record = self.db.execute(query, {
-                "warehouse_id": adjustment_form.warehouse_id,
-                "rm_code_id": adjustment_form.rm_code_id,
-                "status_id": adjustment_form.status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
-            result = record
-
-            # This feature is required for the calculation
-            if not result:
-                # Get the date computed date from other existing records
-                existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                existing_record = self.db.execute(
-                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                # Extract date_computed if record exists, else use None
-                date_computed = existing_record[9] if existing_record else None
-
-                # Extract the stock_recalculation_count value
-                stock_recalculation_count = existing_record[10] if existing_record else None
-
-                # Create a new StockOnHand record
-                new_stock = StockOnHand(
-                    rm_code_id=adjustment_form.rm_code_id,
-                    warehouse_id=adjustment_form.warehouse_id,
-                    rm_soh=0.00,
-                    status_id=adjustment_form.status_id,
-                    date_computed=date_computed,
-                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
-                )
-                self.db.add(new_stock)
-                self.db.commit()
-                self.db.refresh(new_stock)
-
-
-            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
-            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
-                AdjustmentFormCorrect.incorrect_preparation_id == adjustment_form.incorrect_preparation_id,
-                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
-            ).first()
-
-
-            if existing_correct_record:
-                # Update existing record and mark it as deleted
-                existing_correct_record.is_deleted = True
-                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
-                self.db.flush()  # Apply the update in the current transaction
-
-            child_record = AdjustmentFormCorrect(
-                adjustment_parent_id=parent_record.id,
-                rm_code_id=adjustment_form.rm_code_id,
-                warehouse_id=adjustment_form.warehouse_id,
-                status_id=adjustment_form.status_id,
-                qty_prepared=adjustment_form.qty_prepared,
-                qty_return=adjustment_form.qty_return,
-                incorrect_preparation_id=adjustment_form.incorrect_preparation_id
-            )
-
-            main_record = self.db.query(TempPreparationForm).filter(
-                TempPreparationForm.id == adjustment_form.incorrect_preparation_id
-            ).first()
-
-            if main_record:
-                if not main_record.is_adjusted:
-                    main_record.is_adjusted = True
-                    self.db.flush()  # Apply the change
-
-
-        elif form == "transfer form":
-            record = self.db.execute(query, {
-                "warehouse_id": adjustment_form.to_warehouse_id,
-                "rm_code_id": adjustment_form.rm_code_id,
-                "status_id": adjustment_form.status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
-            result = record
-
-            # This feature is required for the calculation
-            if not result:
-                # Get the date computed date from other existing records
-                existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                existing_record = self.db.execute(
-                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                # Extract date_computed if record exists, else use None
-                date_computed = existing_record[9] if existing_record else None
-
-                # Extract the stock_recalculation_count value
-                stock_recalculation_count = existing_record[10] if existing_record else None
-
-                # Create a new StockOnHand record
-                new_stock = StockOnHand(
-                    rm_code_id=adjustment_form.rm_code_id,
-                    warehouse_id=adjustment_form.to_warehouse_id,
-                    rm_soh=0.00,
-                    status_id=adjustment_form.status_id,
-                    date_computed=date_computed,
-                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
-                )
-                self.db.add(new_stock)
-                self.db.commit()
-                self.db.refresh(new_stock)
-
-            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_transfer_id
-            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
-                AdjustmentFormCorrect.incorrect_transfer_id == adjustment_form.incorrect_transfer_id,
-                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
-            ).first()
-
-            if existing_correct_record:
-                # Update existing record and mark it as deleted
-                existing_correct_record.is_deleted = True
-                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
-                self.db.flush()  # Apply the update in the current transaction
-
-            child_record = AdjustmentFormCorrect(
-                adjustment_parent_id=parent_record.id,
-                rm_code_id=adjustment_form.rm_code_id,
-                from_warehouse_id=adjustment_form.from_warehouse_id,
-                to_warehouse_id=adjustment_form.to_warehouse_id,
-                status_id=adjustment_form.status_id,
-                qty_kg=adjustment_form.qty_kg,
-                incorrect_transfer_id=adjustment_form.incorrect_transfer_id
-            )
-
-            main_record = self.db.query(TempTransferForm).filter(
-                TempTransferForm.id == adjustment_form.incorrect_transfer_id
-            ).first()
-
-            if main_record:
-                if not main_record.is_adjusted:
-                    main_record.is_adjusted = True
-                    self.db.flush()  # Apply the change
-
-
-        elif form == "change status form":
-
-            record = self.db.execute(query, {
-                "warehouse_id": adjustment_form.warehouse_id,
-                "rm_code_id": adjustment_form.rm_code_id,
-                "status_id": adjustment_form.new_status_id
-            }).fetchone()  # or .fetchall() if expecting multiple rows
-            result = record
-
-            # This feature is required for the calculation
-            if not result:
-                # Get the date computed date from other existing records
-                existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                existing_record = self.db.execute(
-                    existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                # Extract date_computed if record exists, else use None
-                date_computed = existing_record[9] if existing_record else None
-
-                # Extract the stock_recalculation_count value
-                stock_recalculation_count = existing_record[10] if existing_record else None
-
-                # Create a new StockOnHand record
-                new_stock = StockOnHand(
-                    rm_code_id=adjustment_form.rm_code_id,
-                    warehouse_id=adjustment_form.warehouse_id,
-                    rm_soh=0.00,
-                    status_id=adjustment_form.new_status_id,
-                    date_computed=date_computed,
-                    stock_recalculation_count=stock_recalculation_count  # Insert retrieved stock_recalculation_count
-                )
-                self.db.add(new_stock)
-                self.db.commit()
-                self.db.refresh(new_stock)
-
-
-            # Check if a record exists in AdjustmentFormCorrect with the given incorrect_receiving_id
-            existing_correct_record = self.db.query(AdjustmentFormCorrect).filter(
-                AdjustmentFormCorrect.incorrect_change_status_id == adjustment_form.incorrect_change_status_id,
-                AdjustmentFormCorrect.is_deleted == False  # Assuming you want to ignore already-deleted records
-            ).first()
-
-            if existing_correct_record:
-                # Update existing record and mark it as deleted
-                existing_correct_record.is_deleted = True
-                self.db.add(existing_correct_record)  # Not strictly required because it's already in the session
-                self.db.flush()  # Apply the update in the current transaction
-
-            child_record = AdjustmentFormCorrect(
-                adjustment_parent_id=parent_record.id,
-                rm_code_id=adjustment_form.rm_code_id,
-                warehouse_id=adjustment_form.warehouse_id,
-                current_status_id=adjustment_form.current_status_id,
-                new_status_id=adjustment_form.new_status_id,
-                qty_kg=adjustment_form.qty_kg,
-                incorrect_change_status_id=adjustment_form.incorrect_change_status_id
-            )
-
-            main_record = self.db.query(TempHeldForm).filter(
-                TempHeldForm.id == adjustment_form.incorrect_change_status_id
-            ).first()
-
-            if main_record:
-                if not main_record.is_adjusted:
-                    main_record.is_adjusted = True
-                    self.db.flush()  # Apply the change
-
-
-        self.db.add(child_record)
-        self.db.commit()
-        self.db.refresh(parent_record)
-
-        return {
-            "parent": parent_record,
-            "child": child_record
-        }
-
-    def get_adjustment_form(self):
-        # Create aliases for the Warehouse model
+    def list_active(self) -> List[dict]:
+        """Retrieves active, un-cleared form adjustments with joined readable names."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
-
-
-        # Create aliases for the Warehouse model
         CurrentStatus = aliased(Status, name="current_status")
         NewStatus = aliased(Status, name="new_status")
 
-
-        stmt = (
+        records = (
             self.db.query(
                 AdjustmentFormCorrect.id,
                 AdjustmentFormCorrect.adjustment_parent_id,
-                AdjustmentFormCorrect.incorrect_preparation_id,
-                AdjustmentFormCorrect.incorrect_receiving_id,
-                AdjustmentFormCorrect.incorrect_outgoing_id,
-                AdjustmentFormCorrect.incorrect_transfer_id,
-                AdjustmentFormCorrect.incorrect_change_status_id,
-
-
-                RawMaterial.rm_code.label("raw_material"),
-                AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormParent.ref_number,
                 AdjustmentFormParent.adjustment_type,
                 AdjustmentFormParent.responsible_person,
-
-                Warehouse.wh_name,
-                Status.name.label("status"),
-
                 AdjustmentFormParent.adjustment_date,
                 AdjustmentFormParent.referenced_date,
-
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormCorrect.qty_prepared,
                 AdjustmentFormCorrect.qty_return,
-
+                Warehouse.wh_name,
+                Warehouse.wh_number,
                 FromWarehouse.wh_name.label("from_warehouse"),
                 ToWarehouse.wh_name.label("to_warehouse"),
-
-
+                Status.name.label("status"),
                 CurrentStatus.name.label("current_status"),
                 NewStatus.name.label("new_status"),
-
+                AdjustmentFormCorrect.incorrect_receiving_id,
+                AdjustmentFormCorrect.incorrect_outgoing_id,
+                AdjustmentFormCorrect.incorrect_preparation_id,
+                AdjustmentFormCorrect.incorrect_transfer_id,
+                AdjustmentFormCorrect.incorrect_change_status_id,
                 AdjustmentFormCorrect.created_at,
                 AdjustmentFormCorrect.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 AdjustmentFormCorrect.date_computed
-
             )
-            .join(AdjustmentFormCorrect, AdjustmentFormParent.adjustment_child)  # one-to-one
+            .join(AdjustmentFormParent, AdjustmentFormCorrect.adjustment_parent_id == AdjustmentFormParent.id)
             .join(RawMaterial, AdjustmentFormCorrect.rm_code_id == RawMaterial.id)
             .outerjoin(Warehouse, AdjustmentFormCorrect.warehouse_id == Warehouse.id)
             .outerjoin(Status, AdjustmentFormCorrect.status_id == Status.id)
-
-            .outerjoin(FromWarehouse,
-                  AdjustmentFormCorrect.from_warehouse_id == FromWarehouse.id)  # Join AdjustmentFormCorrect with Warehouse
-            .outerjoin(ToWarehouse,
-                  AdjustmentFormCorrect.to_warehouse_id == ToWarehouse.id)  # Join AdjustmentFormCorrect with Warehouse
-
-            .outerjoin(CurrentStatus,
-                  AdjustmentFormCorrect.current_status_id == CurrentStatus.id)  # Join AdjustmentFormCorrect with CurrentStatus
-            .outerjoin(NewStatus, AdjustmentFormCorrect.new_status_id == NewStatus.id)  # Join AdjustmentFormCorrect with NewStatus
-
-            # OUTER JOINS for optional foreign keys
-            .outerjoin(TempPreparationForm, AdjustmentFormCorrect.incorrect_preparation_id == TempPreparationForm.id)
-            .outerjoin(TempReceivingReport, AdjustmentFormCorrect.incorrect_receiving_id == TempReceivingReport.id)
-            .outerjoin(TempOutgoingReport, AdjustmentFormCorrect.incorrect_outgoing_id == TempOutgoingReport.id)
-            .outerjoin(TempTransferForm, AdjustmentFormCorrect.incorrect_transfer_id == TempTransferForm.id)
-            .outerjoin(TempHeldForm, AdjustmentFormCorrect.incorrect_change_status_id == TempHeldForm.id)
-
+            .outerjoin(FromWarehouse, AdjustmentFormCorrect.from_warehouse_id == FromWarehouse.id)
+            .outerjoin(ToWarehouse, AdjustmentFormCorrect.to_warehouse_id == ToWarehouse.id)
+            .outerjoin(CurrentStatus, AdjustmentFormCorrect.current_status_id == CurrentStatus.id)
+            .outerjoin(NewStatus, AdjustmentFormCorrect.new_status_id == NewStatus.id)
+            .outerjoin(User, AdjustmentFormCorrect.created_by_id == User.id)
             .filter(
-                or_(
-                    AdjustmentFormCorrect.is_cleared.is_(None),
-                    AdjustmentFormCorrect.is_cleared == False
-                ),
-                or_(
-                    AdjustmentFormCorrect.is_deleted.is_(None),
-                    AdjustmentFormCorrect.is_deleted == False
-                )
+                or_(AdjustmentFormCorrect.is_cleared.is_(None), AdjustmentFormCorrect.is_cleared.is_(False)),
+                or_(AdjustmentFormCorrect.is_deleted.is_(None), AdjustmentFormCorrect.is_deleted.is_(False))
             )
             .order_by(desc(AdjustmentFormCorrect.created_at))
+            .all()
         )
-        return stmt.all()
+        return [dict(row._mapping) for row in records]
 
-    def get_deleted_adjustment_form(self):
-
-        # Create aliases for the Warehouse model
+    def list_deleted(self) -> List[dict]:
+        """Retrieves soft-deleted form adjustments for audit recovery."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
-
-
-        # Create aliases for the Warehouse model
         CurrentStatus = aliased(Status, name="current_status")
         NewStatus = aliased(Status, name="new_status")
 
-        """
-             Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
+        records = (
             self.db.query(
                 AdjustmentFormCorrect.id,
                 AdjustmentFormCorrect.adjustment_parent_id,
-                AdjustmentFormCorrect.incorrect_preparation_id,
-                AdjustmentFormCorrect.incorrect_receiving_id,
-                AdjustmentFormCorrect.incorrect_outgoing_id,
-                AdjustmentFormCorrect.incorrect_transfer_id,
-                AdjustmentFormCorrect.incorrect_change_status_id,
-
-                RawMaterial.rm_code.label("raw_material"),
-                AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormParent.ref_number,
                 AdjustmentFormParent.adjustment_type,
                 AdjustmentFormParent.responsible_person,
-
-                Warehouse.wh_name,
-                Status.name.label("status"),
-
                 AdjustmentFormParent.adjustment_date,
                 AdjustmentFormParent.referenced_date,
-
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormCorrect.qty_prepared,
                 AdjustmentFormCorrect.qty_return,
-
+                Warehouse.wh_name,
+                Warehouse.wh_number,
                 FromWarehouse.wh_name.label("from_warehouse"),
                 ToWarehouse.wh_name.label("to_warehouse"),
-
+                Status.name.label("status"),
                 CurrentStatus.name.label("current_status"),
                 NewStatus.name.label("new_status"),
-
+                AdjustmentFormCorrect.incorrect_receiving_id,
+                AdjustmentFormCorrect.incorrect_outgoing_id,
+                AdjustmentFormCorrect.incorrect_preparation_id,
+                AdjustmentFormCorrect.incorrect_transfer_id,
+                AdjustmentFormCorrect.incorrect_change_status_id,
                 AdjustmentFormCorrect.created_at,
                 AdjustmentFormCorrect.updated_at,
-                AdjustmentFormCorrect.date_computed
-
+                func.concat(User.first_name, " ", User.last_name).label("created_by")
             )
-            .join(AdjustmentFormCorrect, AdjustmentFormParent.adjustment_child)  # one-to-one
+            .join(AdjustmentFormParent, AdjustmentFormCorrect.adjustment_parent_id == AdjustmentFormParent.id)
             .join(RawMaterial, AdjustmentFormCorrect.rm_code_id == RawMaterial.id)
             .outerjoin(Warehouse, AdjustmentFormCorrect.warehouse_id == Warehouse.id)
             .outerjoin(Status, AdjustmentFormCorrect.status_id == Status.id)
-
-            .outerjoin(FromWarehouse,
-                       AdjustmentFormCorrect.from_warehouse_id == FromWarehouse.id)  # Join AdjustmentFormCorrect with Warehouse
-            .outerjoin(ToWarehouse,
-                       AdjustmentFormCorrect.to_warehouse_id == ToWarehouse.id)  # Join AdjustmentFormCorrect with Warehouse
-
-            .outerjoin(CurrentStatus,
-                       AdjustmentFormCorrect.current_status_id == CurrentStatus.id)  # Join AdjustmentFormCorrect with CurrentStatus
-            .outerjoin(NewStatus,
-                       AdjustmentFormCorrect.new_status_id == NewStatus.id)  # Join AdjustmentFormCorrect with NewStatus
-
-            # OUTER JOINS for optional foreign keys
-            .outerjoin(TempPreparationForm, AdjustmentFormCorrect.incorrect_preparation_id == TempPreparationForm.id)
-            .outerjoin(TempReceivingReport, AdjustmentFormCorrect.incorrect_receiving_id == TempReceivingReport.id)
-            .outerjoin(TempOutgoingReport, AdjustmentFormCorrect.incorrect_outgoing_id == TempOutgoingReport.id)
-            .outerjoin(TempTransferForm, AdjustmentFormCorrect.incorrect_transfer_id == TempTransferForm.id)
-            .outerjoin(TempHeldForm, AdjustmentFormCorrect.incorrect_change_status_id == TempHeldForm.id)
-            .filter(
-                    AdjustmentFormCorrect.is_cleared == True,  # False check for is_cleared
-                    AdjustmentFormCorrect.is_deleted == True  # False check for is_deleted
-            )
+            .outerjoin(FromWarehouse, AdjustmentFormCorrect.from_warehouse_id == FromWarehouse.id)
+            .outerjoin(ToWarehouse, AdjustmentFormCorrect.to_warehouse_id == ToWarehouse.id)
+            .outerjoin(CurrentStatus, AdjustmentFormCorrect.current_status_id == CurrentStatus.id)
+            .outerjoin(NewStatus, AdjustmentFormCorrect.new_status_id == NewStatus.id)
+            .outerjoin(User, AdjustmentFormCorrect.created_by_id == User.id)
+            .filter(AdjustmentFormCorrect.is_deleted.is_(True))
+            .order_by(desc(AdjustmentFormCorrect.updated_at))
+            .all()
         )
+        return [dict(row._mapping) for row in records]
 
-        # Return All the result
-        return stmt.all()
-
-    def get_historical_adjustment_form(self):
-        # Create aliases for the Warehouse model
+    def list_historical(
+        self,
+        record_id: Optional[UUID] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        rm_code: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[dict]:
+        """Retrieves computed historical adjustment records with pagination."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
-
-        # Create aliases for the Warehouse model
         CurrentStatus = aliased(Status, name="current_status")
         NewStatus = aliased(Status, name="new_status")
 
-        """
-             Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
+        query = (
             self.db.query(
                 AdjustmentFormCorrect.id,
                 AdjustmentFormCorrect.adjustment_parent_id,
-                AdjustmentFormCorrect.incorrect_preparation_id,
-                AdjustmentFormCorrect.incorrect_receiving_id,
-                AdjustmentFormCorrect.incorrect_outgoing_id,
-                AdjustmentFormCorrect.incorrect_transfer_id,
-                AdjustmentFormCorrect.incorrect_change_status_id,
-
-                RawMaterial.rm_code.label("raw_material"),
-                AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormParent.ref_number,
                 AdjustmentFormParent.adjustment_type,
                 AdjustmentFormParent.responsible_person,
-
-                Warehouse.wh_name,
-                Status.name.label("status"),
-
                 AdjustmentFormParent.adjustment_date,
                 AdjustmentFormParent.referenced_date,
-
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                AdjustmentFormCorrect.qty_kg,
                 AdjustmentFormCorrect.qty_prepared,
                 AdjustmentFormCorrect.qty_return,
-
+                Warehouse.wh_name,
+                Warehouse.wh_number,
                 FromWarehouse.wh_name.label("from_warehouse"),
                 ToWarehouse.wh_name.label("to_warehouse"),
-
+                Status.name.label("status"),
                 CurrentStatus.name.label("current_status"),
                 NewStatus.name.label("new_status"),
-
+                AdjustmentFormCorrect.incorrect_receiving_id,
+                AdjustmentFormCorrect.incorrect_outgoing_id,
+                AdjustmentFormCorrect.incorrect_preparation_id,
+                AdjustmentFormCorrect.incorrect_transfer_id,
+                AdjustmentFormCorrect.incorrect_change_status_id,
                 AdjustmentFormCorrect.created_at,
                 AdjustmentFormCorrect.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 AdjustmentFormCorrect.date_computed
-
             )
-            .join(AdjustmentFormCorrect, AdjustmentFormParent.adjustment_child)  # one-to-one
+            .join(AdjustmentFormParent, AdjustmentFormCorrect.adjustment_parent_id == AdjustmentFormParent.id)
             .join(RawMaterial, AdjustmentFormCorrect.rm_code_id == RawMaterial.id)
             .outerjoin(Warehouse, AdjustmentFormCorrect.warehouse_id == Warehouse.id)
             .outerjoin(Status, AdjustmentFormCorrect.status_id == Status.id)
-
-            .outerjoin(FromWarehouse,
-                       AdjustmentFormCorrect.from_warehouse_id == FromWarehouse.id)  # Join AdjustmentFormCorrect with Warehouse
-            .outerjoin(ToWarehouse,
-                       AdjustmentFormCorrect.to_warehouse_id == ToWarehouse.id)  # Join AdjustmentFormCorrect with Warehouse
-
-            .outerjoin(CurrentStatus,
-                       AdjustmentFormCorrect.current_status_id == CurrentStatus.id)  # Join AdjustmentFormCorrect with CurrentStatus
-            .outerjoin(NewStatus,
-                       AdjustmentFormCorrect.new_status_id == NewStatus.id)  # Join AdjustmentFormCorrect with NewStatus
-
-            # OUTER JOINS for optional foreign keys
-            .outerjoin(TempPreparationForm, AdjustmentFormCorrect.incorrect_preparation_id == TempPreparationForm.id)
-            .outerjoin(TempReceivingReport, AdjustmentFormCorrect.incorrect_receiving_id == TempReceivingReport.id)
-            .outerjoin(TempOutgoingReport, AdjustmentFormCorrect.incorrect_outgoing_id == TempOutgoingReport.id)
-            .outerjoin(TempTransferForm, AdjustmentFormCorrect.incorrect_transfer_id == TempTransferForm.id)
-            .outerjoin(TempHeldForm, AdjustmentFormCorrect.incorrect_change_status_id == TempHeldForm.id)
-
+            .outerjoin(FromWarehouse, AdjustmentFormCorrect.from_warehouse_id == FromWarehouse.id)
+            .outerjoin(ToWarehouse, AdjustmentFormCorrect.to_warehouse_id == ToWarehouse.id)
+            .outerjoin(CurrentStatus, AdjustmentFormCorrect.current_status_id == CurrentStatus.id)
+            .outerjoin(NewStatus, AdjustmentFormCorrect.new_status_id == NewStatus.id)
+            .outerjoin(User, AdjustmentFormCorrect.created_by_id == User.id)
             .filter(
-                    # AdjustmentForm.is_cleared == True,  # False check for is_cleared
-                        AdjustmentFormCorrect.date_computed.is_not(None),
-                    or_(
-                        AdjustmentFormCorrect.is_deleted.is_(None),  # NULL check for is_deleted
-                        AdjustmentFormCorrect.is_deleted == False  # False check for is_deleted
-                    )
+                AdjustmentFormCorrect.date_computed.is_not(None),
+                or_(AdjustmentFormCorrect.is_deleted.is_(None), AdjustmentFormCorrect.is_deleted.is_(False))
             )
         )
 
-        # Return All the result
-        return stmt.all()
+        if record_id:
+            query = query.filter(AdjustmentFormCorrect.id == record_id)
 
-    def update_adjustment_form(self, adjustment_form_id: UUID, adjustment_form_update: AdjustmentFormUpdate):
-        try:
-            # Check if the status id is null
-            query = text("""SELECT * FROM view_beginning_soh
-                                    WHERE warehouseid = :warehouse_id
-                                          AND rawmaterialid = :rm_code_id
-                                          AND statusid = :status_id""")
+        if date_from and date_to:
+            query = query.filter(and_(AdjustmentFormParent.adjustment_date >= date_from, AdjustmentFormParent.adjustment_date <= date_to))
+        elif date_from:
+            query = query.filter(AdjustmentFormParent.adjustment_date >= date_from)
+        elif date_to:
+            query = query.filter(AdjustmentFormParent.adjustment_date <= date_to)
 
+        if rm_code and rm_code.strip().lower() != "all":
+            query = query.filter(RawMaterial.rm_code == rm_code.strip())
 
-            if adjustment_form_update.current_status_id and adjustment_form_update.new_status_id:
-                record = self.db.execute(query, {
-                    "warehouse_id": adjustment_form_update.warehouse_id,
-                    "rm_code_id": adjustment_form_update.rm_code_id,
-                    "status_id": adjustment_form_update.new_status_id
-                }).fetchone()  # or .fetchall() if expecting multiple rows
-                result = record
-
-                # This feature is required for the calculation
-                if not result:
-                    # Get the date computed date from other existing records
-                    existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                    existing_record = self.db.execute(
-                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                    # Extract date_computed if record exists, else use None
-                    date_computed = existing_record[9] if existing_record else None
-
-                    # Extract the stock_recalculation_count value
-                    stock_recalculation_count = existing_record[10] if existing_record else None
-
-                    # Create a new StockOnHand record
-                    new_stock = StockOnHand(
-                        rm_code_id=adjustment_form_update.rm_code_id,
-                        warehouse_id=adjustment_form_update.warehouse_id,
-                        rm_soh=0.00,
-                        status_id=adjustment_form_update.new_status_id,
-                        date_computed=date_computed,
-                        stock_recalculation_count=stock_recalculation_count
-                        # Insert retrieved stock_recalculation_count
-                    )
-                    self.db.add(new_stock)
-                    self.db.commit()
-                    self.db.refresh(new_stock)
-
-
-
-
-            elif adjustment_form_update.from_warehouse_id and adjustment_form_update.to_warehouse_id:
-                record = self.db.execute(query, {
-                    "warehouse_id": adjustment_form_update.to_warehouse_id,
-                    "rm_code_id": adjustment_form_update.rm_code_id,
-                    "status_id": adjustment_form_update.status_id
-                }).fetchone()  # or .fetchall() if expecting multiple rows
-                result = record
-
-                # This feature is required for the calculation
-                if not result:
-                    # Get the date computed date from other existing records
-                    existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                    existing_record = self.db.execute(
-                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                    # Extract date_computed if record exists, else use None
-                    date_computed = existing_record[9] if existing_record else None
-
-                    # Extract the stock_recalculation_count value
-                    stock_recalculation_count = existing_record[10] if existing_record else None
-
-                    # Create a new StockOnHand record
-                    new_stock = StockOnHand(
-                        rm_code_id=adjustment_form_update.rm_code_id,
-                        warehouse_id=adjustment_form_update.to_warehouse_id,
-                        rm_soh=0.00,
-                        status_id=adjustment_form_update.status_id,
-                        date_computed=date_computed,
-                        stock_recalculation_count=stock_recalculation_count
-                        # Insert retrieved stock_recalculation_count
-                    )
-                    self.db.add(new_stock)
-                    self.db.commit()
-                    self.db.refresh(new_stock)
-
-            else:
-                record = self.db.execute(query, {
-                    "warehouse_id": adjustment_form_update.warehouse_id,
-                    "rm_code_id": adjustment_form_update.rm_code_id,
-                    "status_id": adjustment_form_update.status_id
-                }).fetchone()  # or .fetchall() if expecting multiple rows
-                result = record
-
-                # This feature is required for the calculation
-                if not result:
-                    # Get the date computed date from other existing records
-                    existing_query = text("""SELECT * FROM view_beginning_soh""")
-
-                    existing_record = self.db.execute(
-                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-
-                    # Extract date_computed if record exists, else use None
-                    date_computed = existing_record[9] if existing_record else None
-
-                    # Extract the stock_recalculation_count value
-                    stock_recalculation_count = existing_record[10] if existing_record else None
-
-                    # Create a new StockOnHand record
-                    new_stock = StockOnHand(
-                        rm_code_id=adjustment_form_update.rm_code_id,
-                        warehouse_id=adjustment_form_update.warehouse_id,
-                        rm_soh=0.00,
-                        status_id=adjustment_form_update.status_id,
-                        date_computed=date_computed,
-                        stock_recalculation_count=stock_recalculation_count
-                        # Insert retrieved stock_recalculation_count
-                    )
-                    self.db.add(new_stock)
-                    self.db.commit()
-                    self.db.refresh(new_stock)
-
-
-            # 1. Fetch child record
-            child_record = self.db.query(AdjustmentFormCorrect).filter(
-                AdjustmentFormCorrect.adjustment_parent_id == adjustment_form_id,
-                AdjustmentFormCorrect.is_deleted == False
-            ).first()
-
-            if not child_record:
-                raise AdjustmentFormNotFoundException(detail="Child record not found or already deleted.")
-
-            # 2. Fetch parent record
-            parent_record = self.db.query(AdjustmentFormParent).filter(
-                AdjustmentFormParent.id == adjustment_form_id
-            ).first()
-
-            if not parent_record:
-                raise AdjustmentFormNotFoundException(detail="Parent record not found.")
-
-            update_data = adjustment_form_update.dict(exclude_unset=True)
-
-            # 3. Update parent fields
-            parent_fields = [
-                "ref_number", "adjustment_date", "referenced_date",
-                "adjustment_type", "responsible_person"
-            ]
-
-            for field in parent_fields:
-                if field in update_data:
-                    setattr(parent_record, field, update_data[field])
-
-            # 4. Update child fields (all remaining fields go to child)
-            child_fields = set(update_data.keys()) - set(parent_fields)
-            for field in child_fields:
-                setattr(child_record, field, update_data[field])
-
-            self.db.commit()
-            self.db.refresh(parent_record)
-            self.db.refresh(child_record)
-
-            return {
-                "parent": parent_record,
-                "child": child_record
-            }
-
-        except Exception as e:
-            raise AdjustmentFormUpdateException(detail=f"Error: {str(e)}")
-
-    def soft_delete_adjustment_form(self, adjustment_form_id: UUID):
-        try:
-            adjustment_form = (self.db.query(AdjustmentFormCorrect)
-                               .filter(AdjustmentFormCorrect.id == adjustment_form_id)
-                               .first())
-
-            if not adjustment_form or adjustment_form.is_deleted:
-                raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already deleted.")
-
-            adjustment_form.is_deleted = True
-            self.db.commit()
-            self.db.refresh(adjustment_form)
-            return self.get_adjustment_form()
-
-        except Exception as e:
-            raise AdjustmentFormSoftDeleteException(detail=f"Error: {str(e)}")
-
-
-    def restore_adjustment_form(self, adjustment_form_id: UUID):
-        try:
-            adjustment_form = (self.db.query(AdjustmentFormCorrect).
-                               filter(AdjustmentFormCorrect.id == adjustment_form_id)
-                               .first())
-            if not adjustment_form or not adjustment_form.is_deleted:
-                raise AdjustmentFormNotFoundException(detail="Adjustment Form Record not found or already restored.")
-
-            adjustment_form.is_deleted = False
-            self.db.commit()
-            self.db.refresh(adjustment_form)
-            return adjustment_form
-
-        except Exception as e:
-            raise AdjustmentFormRestoreException(detail=f"Error: {str(e)}")
-
-    def validate_adjustment_outgoing_form(
-            self,
-            incorrect_record_id,
-            rm_id,
-            warehouse_id,
-            entered_qty,
-            status_id
-    ):
-        try:
-
-            outgoing_record_qty = text(f"""SELECT 
-                                                rm_code_id,
-                                                qty_kg 
-                                                FROM public.tbl_outgoing_reports
-                                            WHERE id = '{incorrect_record_id}'
-                                                """)
-
-            new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                       WHERE warehouseid = '{warehouse_id}'
-                                               AND statusid = '{status_id}'
-                                               AND rawmaterialid = '{rm_id}'
-                                                """)
-
-            result = self.db.execute(new_beginning_query)
-            beginning_balance = result.fetchone()
-
-            # Check if there is a record after executing the query
-
-            # if beginning_balance:
-            #
-            #
-            #
-            # else:
-            #     return False
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-    def validate_adjustment_preparation_form(
-            self,
-            incorrect_record_id,
-            rm_id,
-            warehouse_id,
-            entered_qty,
-            status_id
-    ):
-        return
-
-    def validate_adjustment_transfer_form(
-            self,
-            incorrect_record_id,
-            rm_id,
-            warehouse_id,
-            entered_qty,
-            status_id
-    ):
-        return
-
-    def validate_adjustment_change_status_form(
-            self,
-            incorrect_record_id,
-            rm_id,
-            warehouse_id,
-            entered_qty,
-            status_id
-    ):
-        return
+        records = (
+            query
+            .order_by(desc(AdjustmentFormCorrect.date_computed), desc(AdjustmentFormCorrect.created_at))
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+        return [dict(row._mapping) for row in records]

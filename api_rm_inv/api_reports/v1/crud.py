@@ -1,9 +1,19 @@
-from api_rm_inv.api_reports.v1.main import AppCRUD
-from api_rm_inv.api_reports.v1.schemas import FormEntryResponse
-from sqlalchemy import text
-from typing import List, Optional
+"""
+Data Access Layer (CRUD) for Inventory Reports.
 
-class FormEntryCRUD(AppCRUD):
+Executes parameterized queries against schema_whrm.view_form_entries_log
+with pagination and fast dictionary mapping for large historical datasets.
+"""
+
+from typing import List, Optional, Dict, Any
+from sqlalchemy import text
+
+from core.base import BaseRepository
+
+
+class FormEntryCRUD(BaseRepository):
+    """Repository handling read queries against unified form entry views."""
+
     def get_form_entries(
         self,
         date_from: Optional[str] = None,
@@ -12,8 +22,13 @@ class FormEntryCRUD(AppCRUD):
         document_type: Optional[str] = None,
         location: Optional[str] = None,
         status: Optional[str] = None,
-    ) -> List[FormEntryResponse]:
-
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[dict]:
+        """
+        Retrieves paginated form entries matching multi-field filter criteria.
+        Converts rows via mappings() for high serialization throughput.
+        """
         query = """
             SELECT
                 date_encoded,
@@ -24,58 +39,110 @@ class FormEntryCRUD(AppCRUD):
                 qty,
                 whse_no,
                 status
-            FROM view_form_entries_log
-            WHERE 1 = 1 AND is_deleted = FALSE
-
+            FROM schema_whrm.view_form_entries_log
+            WHERE is_deleted = FALSE
         """
-
-        params = {}
+        params = {"limit": limit, "offset": offset}
 
         if date_from and date_to:
             query += " AND date_reported BETWEEN :date_from AND :date_to"
             params["date_from"] = date_from
             params["date_to"] = date_to
+        elif date_from:
+            query += " AND date_reported >= :date_from"
+            params["date_from"] = date_from
+        elif date_to:
+            query += " AND date_reported <= :date_to"
+            params["date_to"] = date_to
 
-        if mat_code and mat_code.lower() != "all" and mat_code.strip() != "":
-            query += " AND mat_code = :mat_code"
-            params["mat_code"] = mat_code
+        if mat_code and mat_code.strip().lower() != "all":
+            query += " AND UPPER(mat_code) = :mat_code"
+            params["mat_code"] = mat_code.strip().upper()
 
-        if document_type and document_type.lower() != "all" and document_type.strip() != "":
-            query += " AND document_type LIKE :document_type"
-            if document_type == "adjustment_form_entries":
-
+        if document_type and document_type.strip().lower() != "all":
+            clean_doc = document_type.strip().lower()
+            if clean_doc == "adjustment_form_entries":
+                query += " AND document_type LIKE :document_type"
                 params["document_type"] = "adjustment_form_%correct"
             else:
-                params["document_type"] = document_type
+                query += " AND document_type = :document_type"
+                params["document_type"] = clean_doc
 
-            print(document_type)
-        if location and location.lower() != "all" and location.strip() != "":
+        if location and location.strip().lower() != "all":
             query += " AND whse_no = :whse_no"
-            params["whse_no"] = location
+            params["whse_no"] = location.strip()
 
+        if status and status.strip().lower() != "all":
+            query += " AND LOWER(status) = :status"
+            params["status"] = status.strip().lower()
 
-        if status and status.lower() != "all" and status.strip() != "":
-            query += " AND status = :status"
-            params["status"] = status
-
-
+        query += " ORDER BY date_reported DESC, date_encoded DESC LIMIT :limit OFFSET :offset"
 
         result = self.db.execute(text(query), params)
-        rows = result.fetchall()
+        return [dict(row) for row in result.mappings().all()]
 
-        return [
-            FormEntryResponse(
-                date_encoded=row.date_encoded,
-                date_reported=row.date_reported,
-                document_type=row.document_type,
-                document_number=row.document_number,
-                mat_code=row.mat_code,
-                qty=row.qty,
-                whse_no=row.whse_no,
-                status=row.status
-                # is_deleted=row.is_deleted,
-                # is_cleared=row.is_cleared,
-                # is_computed=row.is_computed,
-            )
-            for row in rows
-        ]
+    def get_form_entries_for_export(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        mat_code: Optional[str] = None,
+        document_type: Optional[str] = None,
+        location: Optional[str] = None,
+        status: Optional[str] = None,
+        max_rows: int = 50000
+    ) -> List[dict]:
+        """
+        Retrieves raw dictionary records optimized for streaming into Pandas/Excel.
+        Bypasses Pydantic model instantiation overhead to minimize memory usage.
+        """
+        query = """
+            SELECT
+                date_encoded,
+                date_reported,
+                document_type,
+                document_number,
+                mat_code,
+                qty,
+                whse_no,
+                status
+            FROM schema_whrm.view_form_entries_log
+            WHERE is_deleted = FALSE
+        """
+        params = {"max_rows": max_rows}
+
+        if date_from and date_to:
+            query += " AND date_reported BETWEEN :date_from AND :date_to"
+            params["date_from"] = date_from
+            params["date_to"] = date_to
+        elif date_from:
+            query += " AND date_reported >= :date_from"
+            params["date_from"] = date_from
+        elif date_to:
+            query += " AND date_reported <= :date_to"
+            params["date_to"] = date_to
+
+        if mat_code and mat_code.strip().lower() != "all":
+            query += " AND UPPER(mat_code) = :mat_code"
+            params["mat_code"] = mat_code.strip().upper()
+
+        if document_type and document_type.strip().lower() != "all":
+            clean_doc = document_type.strip().lower()
+            if clean_doc == "adjustment_form_entries":
+                query += " AND document_type LIKE :document_type"
+                params["document_type"] = "adjustment_form_%correct"
+            else:
+                query += " AND document_type = :document_type"
+                params["document_type"] = clean_doc
+
+        if location and location.strip().lower() != "all":
+            query += " AND whse_no = :whse_no"
+            params["whse_no"] = location.strip()
+
+        if status and status.strip().lower() != "all":
+            query += " AND LOWER(status) = :status"
+            params["status"] = status.strip().lower()
+
+        query += " ORDER BY date_reported ASC, mat_code ASC LIMIT :max_rows"
+
+        result = self.db.execute(text(query), params)
+        return [dict(row) for row in result.mappings().all()]

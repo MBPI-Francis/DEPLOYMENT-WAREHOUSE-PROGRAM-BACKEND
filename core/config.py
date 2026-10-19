@@ -47,4 +47,11 @@ class Settings:
     )
 
 
+    # JWT Authentication & Security Configuration (Runs 100% Offline / LAN)
+    # -----------------------------------------------------------------------
+    # Change this random string to your company's private secret passphrase
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "mbpi-secret-key-plant-operations-2026-secure-token-lan")
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 720  # 12 hours (1 full shift)
+    
 settings = Settings()

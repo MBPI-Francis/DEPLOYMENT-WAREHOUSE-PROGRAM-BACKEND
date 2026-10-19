@@ -1,252 +1,275 @@
-from typing import Optional, List
+"""
+Business Service Layer for Stock on Hand Module.
 
-from sqlalchemy.exc import IntegrityError
-from api_rm_inv.api_raw_materials.v1.schemas import RawMaterialCreate
-from api_rm_inv.api_raw_materials.v1.crud import RawMaterialCRUD
-from api_rm_inv.api_status.v1.models import Status
-from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_stock_on_hand.v1.exceptions import (StockOnHandCreateException,
-                                                        StockOnHandNotFoundException,
-                                                        )
-from api_rm_inv.api_stock_on_hand.v1.main import AppService
-from api_rm_inv.api_stock_on_hand.v1.schemas import StockOnHandCreate, StockOnHandUpdate, HistoricalStockOnHandResponse
-from uuid import UUID
+Features:
+- Live SOH balance querying with pagination.
+- High-performance batch Excel SOH importer with in-memory caching.
+- SOH creation using human business keys (rm_code, wh_number, status_name).
+"""
+
 import io
+from decimal import Decimal
+from typing import List, Optional, Dict, Any
+from uuid import UUID
 import pandas as pd
-from api_rm_inv.api_warehouses.v1.models import Warehouse
-from api_rm_inv.api_stock_on_hand.v1.crud import StockOnHandCRUD
-from fastapi import HTTPException
 import msoffcrypto
-from sqlalchemy import text
+from fastapi import HTTPException, status
+
+from core.base import BaseService
+from api_rm_inv.api_stock_on_hand.v1.crud import StockOnHandCRUD
+from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
+from api_rm_inv.api_raw_materials.v1.models import RawMaterial
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from api_rm_inv.api_stock_on_hand.v1.schemas import (
+    StockOnHandCreate,
+    StockOnHandUpdate,
+    StockOnHandResponse,
+    HistoricalStockOnHandResponse
+)
 
 
+class StockOnHandService(BaseService):
+    """Business service coordinating stock baseline snapshots and batch imports."""
 
-# These are the code for the business logic like calculation etc.
-class StockOnHandService(AppService):
-    def create_rm_soh(self, item: StockOnHandCreate):
-        try:
-            rm_soh_item = StockOnHandCRUD(self.db).create_rm_soh(item)
+    def __init__(self, db):
+        super().__init__(db)
+        self.crud = StockOnHandCRUD(db)
 
-        except Exception as e:
-            raise StockOnHandCreateException(detail=f"Error: {str(e)}")
+    def create_rm_soh(self, payload: StockOnHandCreate) -> StockOnHandResponse:
+        """
+        Creates an initial stock on hand baseline entry using human codes.
+        """
+        material = self.crud.resolve_raw_material(payload.rm_code)
+        if not material:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Material '{payload.rm_code}' not found.")
 
-        return rm_soh_item
+        warehouse = self.crud.resolve_warehouse(payload.wh_number)
+        if not warehouse:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Warehouse '{payload.wh_number}' not found.")
 
-    def all_rm_soh(self):
-        try:
-            rm_soh_item = StockOnHandCRUD(self.db).all_rm_soh()
+        status_rec = self.crud.resolve_status(payload.status_name)
+        if not status_rec:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Status '{payload.status_name}' not found.")
 
-        except Exception as e:
-            raise StockOnHandNotFoundException(detail=f"Error: {str(e)}")
-        return rm_soh_item
+        recalc_count = payload.stock_recalculation_count or self.crud.get_latest_recalculation_count()
 
-    # Still not sure what is this about
+        record = StockOnHand(
+            rm_code_id=material.id,
+            warehouse_id=warehouse.id,
+            status_id=status_rec.id,
+            rm_soh=payload.rm_soh,
+            stock_recalculation_count=recalc_count,
+            description=payload.description,
+            created_by_id=payload.created_by_id,
+            is_deleted=False,
+            is_imported=False
+        )
+        created = self.crud.create(record)
+
+        # Return refreshed DTO
+        paginated = self.crud.list_all_paginated(limit=1, offset=0)
+        matched = next((item for item in paginated if item["id"] == created.id), None)
+        if matched:
+            return matched
+        return created
+
+    def all_rm_soh(self, limit: int = 100, offset: int = 0) -> List[dict]:
+        """Retrieves paginated active SOH records to prevent RAM exhaustion at 1M rows."""
+        return self.crud.list_all_paginated(limit=limit, offset=offset)
+
     def get_historical_stock_on_hand(
         self,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         mat_code: Optional[str] = None,
         location: Optional[str] = None,
-        status: Optional[str] = None,
-    ) -> List[HistoricalStockOnHandResponse]:
-        try:
-            rm_soh_items = StockOnHandCRUD(self.db).get_historical_stock_on_hand(
-                date_from=date_from,
-                date_to=date_to,
-                mat_code=mat_code,
-                location=location,
-                status=status
-            )
-        except Exception as e:
-            raise Exception(f"Error retrieving historical SOH: {str(e)}")
-        return rm_soh_items
+        status_name: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[dict]:
+        """Retrieves computed historical SOH records with multi-field filtering and pagination."""
+        return self.crud.get_historical_stock_on_hand(
+            date_from=date_from,
+            date_to=date_to,
+            mat_code=mat_code,
+            location=location,
+            status=status_name,
+            limit=limit,
+            offset=offset
+        )
 
-    # The export_historical_soh_to_excel_file method is REMOVED from here.
-    # Its logic will be moved to the frontend.
+    def update_rm_soh(self, soh_id: UUID, payload: StockOnHandUpdate) -> StockOnHand:
+        """Modifies baseline SOH quantity or description."""
+        record = self.crud.get_by_id(soh_id)
+        if not record or record.is_deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock on Hand record not found or already deleted.")
 
+        if payload.rm_soh is not None:
+            record.rm_soh = payload.rm_soh
+        if payload.description is not None:
+            record.description = payload.description.strip()
+        if payload.updated_by_id is not None:
+            record.updated_by_id = payload.updated_by_id
 
+        self.db.commit()
+        self.db.refresh(record)
+        return record
 
-    # Still not sure what is this about
-    # def get_rm_soh(self, warehouse_id: UUID, rm_code_id: UUID):
-    #     try:
-    #         rm_soh_item = TempReceivingReportCRUD(self.db).get_latest_soh_record(warehouse_id, rm_code_id)
-    #
-    #     except Exception as e:
-    #         raise StockOnHandNotFoundException(detail=f"Error: {str(e)}")
-    #     return rm_soh_item
+    def soft_delete_rm_soh(self, soh_id: UUID) -> StockOnHand:
+        """Soft-deletes an SOH entry."""
+        record = self.crud.get_by_id(soh_id)
+        if not record or record.is_deleted:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock on Hand record not found or already deleted.")
 
-    # This is the service/business logic in updating the rm_soh.
-    def update_rm_soh(self, rm_soh_id: UUID, rm_soh_update: StockOnHandUpdate):
-        rm_soh = StockOnHandCRUD(self.db).update_rm_soh(rm_soh_id, rm_soh_update)
-        return rm_soh
+        record.is_deleted = True
+        self.db.commit()
+        self.db.refresh(record)
+        return record
 
-    # This is the service/business logic in soft deleting the rm_soh.
-    def soft_delete_rm_soh(self, rm_soh_id: UUID):
-        rm_soh = StockOnHandCRUD(self.db).soft_delete_rm_soh(rm_soh_id)
-        return rm_soh
+    def restore_rm_soh(self, soh_id: UUID) -> StockOnHand:
+        """Restores a soft-deleted SOH entry."""
+        record = self.crud.get_by_id(soh_id)
+        if not record or not record.is_deleted:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock on Hand record is not in a deleted state.")
 
+        record.is_deleted = False
+        self.db.commit()
+        self.db.refresh(record)
+        return record
 
-    # This is the service/business logic in soft restoring the rm_soh.
-    def restore_rm_soh(self, rm_soh_id: UUID):
-        rm_soh = StockOnHandCRUD(self.db).restore_rm_soh(rm_soh_id)
-        return rm_soh
-
-
-
-    def import_rm_soh(self, content, password):
-
-        # Convert bytes to a BytesIO stream
+    def import_rm_soh(self, content: bytes, password: Optional[str] = None) -> Dict[str, Any]:
+        """
+        High-performance batch SOH importer:
+        1. Decrypts file if password protected.
+        2. Pre-caches all materials, warehouses, and statuses in memory to eliminate N+1 queries.
+        3. Batch-inserts all rows across all sheets in ONE single atomic transaction.
+        """
         excel_data = io.BytesIO(content)
         office_file = msoffcrypto.OfficeFile(excel_data)
         decrypted_excel = io.BytesIO()
 
-        # Check if file is encrypted
         if office_file.is_encrypted():
             try:
-                office_file.load_key(password="maranatha101")  # Attempt decryption using the content of the password
+                pass_key = password or "maranatha101"
+                office_file.load_key(password=pass_key)
                 office_file.decrypt(decrypted_excel)
-                office_file.decrypt(decrypted_excel)  # Write decrypted content to a new BytesIO object
-                df = pd.read_excel(decrypted_excel, sheet_name=None, engine='openpyxl', header=0)
+                df_sheets = pd.read_excel(decrypted_excel, sheet_name=None, engine='openpyxl', header=0)
             except Exception:
-                raise HTTPException(status_code=400, detail="Incorrect password. Unable to import the Excel file.")
-
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password or unable to decrypt Excel file.")
         else:
-            # If there is no password, the panda will read it
-            df = pd.read_excel(excel_data, sheet_name=None, engine='openpyxl', header=0)
+            df_sheets = pd.read_excel(excel_data, sheet_name=None, engine='openpyxl', header=0)
 
-        try:
+        # -------------------------------------------------------------------
+        # Pre-cache Lookups in Memory (Turns 10,000 DB queries into 3 fast ones)
+        # -------------------------------------------------------------------
+        material_cache = {
+            m.rm_code.strip().upper(): m.id
+            for m in self.db.query(RawMaterial.rm_code, RawMaterial.id).all()
+        }
+        warehouse_cache = {
+            str(w.wh_number).strip(): w.id
+            for w in self.db.query(Warehouse.wh_number, Warehouse.id).all()
+        }
+        status_cache = {
+            s.name.strip().lower(): s.id
+            for s in self.db.query(Status.name, Status.id).all()
+        }
 
+        default_status_id = status_cache.get("good")
+        latest_count = self.crud.get_latest_recalculation_count()
+
+        sheet_to_wh_num = {
+            "whse1": "1",
+            "whse2": "2",
+            "whse4": "4",
+        }
+
+        new_soh_records = []
+        new_materials_to_create = {}
+
+        for sheet_name, data in df_sheets.items():
+            wh_num = sheet_to_wh_num.get(sheet_name.strip().lower())
+            if not wh_num or data.empty:
+                continue
+
+            wh_id = warehouse_cache.get(wh_num)
+            if not wh_id:
+                continue
+
+            # Extract snapshot date from first column header
             try:
-                def get_rm_code_id(rm_code):
-                    # This code removes any leading or trailing whitespace and converts to uppercase
-                    raw_mat = rm_code.strip().upper()
+                raw_header = str(data.columns[0]).strip()
+                snapshot_date = pd.to_datetime(raw_header, errors='coerce').date()
+                if pd.isna(snapshot_date):
+                    snapshot_date = date.today()
+            except Exception:
+                snapshot_date = date.today()
 
-                    # This code checks if the raw material exists
-                    rm_code_record = self.db.query(RawMaterial.id).filter(RawMaterial.rm_code == raw_mat).first()
+            # Align column headers
+            data.columns = data.iloc[0]
+            data = data[0:].reset_index(drop=True)
 
-                    if rm_code_record:
-                        return rm_code_record.id  # It returns the existing raw material ID
+            if len(data.columns) >= 6:
+                data.columns = [f"COL_{i}" for i in range(len(data.columns))]
+            else:
+                continue
 
-                    # If raw material does not exist, create it
-                    new_raw_material_data = RawMaterialCreate(
-                        rm_code=raw_mat,  # Ensure rm_code is set (mandatory)
-                        rm_name=raw_mat,  # Assuming rm_name is the same as rm_code
-                        description="Auto-generated raw material",  # Provide a default description
-                        created_by_id=None,  # Replace with actual user ID if needed
-                        updated_by_id=None
-                    )
+            # COL_0 = rm_code, COL_4 = total qty, COL_5 = status
+            for _, row in data.iterrows():
+                raw_code = row.get("COL_0")
+                if pd.isna(raw_code) or not str(raw_code).strip():
+                    continue
 
-                    # Instantiate the RawMaterialCRUD class
-                    raw_material_crud = RawMaterialCRUD(self.db)
+                cleaned_rm_code = str(raw_code).strip().upper()
 
-                    try:
-                        new_raw_material = raw_material_crud.create_raw_material(new_raw_material_data)
-                        return new_raw_material.id
-                    except IntegrityError:
-                        self.db.rollback()
-                        raise HTTPException(status_code=500, detail="Error while creating raw material.")
-
-
-                def get_latest_count():
-                    # Get the largest stock recalculation count
-                    existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
-                                            FROM tbl_stock_on_hand;
-                                            """)
-
-                    largest_count = self.db.execute(
-                        existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-                    if largest_count[0]:
-                        new_stock_recalculation_count = largest_count[0] + 1
+                # Resolve material UUID (register if completely missing)
+                rm_id = material_cache.get(cleaned_rm_code)
+                if not rm_id:
+                    if cleaned_rm_code not in new_materials_to_create:
+                        new_mat = RawMaterial(
+                            rm_code=cleaned_rm_code,
+                            rm_name=cleaned_rm_code,
+                            description="Auto-generated during SOH Excel Import"
+                        )
+                        self.db.add(new_mat)
+                        self.db.flush()
+                        material_cache[cleaned_rm_code] = new_mat.id
+                        rm_id = new_mat.id
                     else:
-                        new_stock_recalculation_count = 1
+                        rm_id = new_materials_to_create[cleaned_rm_code]
 
-                    return new_stock_recalculation_count
+                # Resolve quantity
+                raw_qty = row.get("COL_4", 0)
+                try:
+                    qty = Decimal(str(raw_qty)).quantize(Decimal("0.01"))
+                except Exception:
+                    qty = Decimal("0.00")
 
-                def get_status_id(status_name):
-                    status_record = self.db.query(Status.id).filter(Status.name == status_name).first()
-                    return status_record.id if status_record else None
+                # Resolve status
+                raw_st = row.get("COL_5")
+                st_id = default_status_id
+                if not pd.isna(raw_st) and str(raw_st).strip():
+                    st_id = status_cache.get(str(raw_st).strip().lower(), default_status_id)
 
+                new_soh_records.append(
+                    StockOnHand(
+                        rm_code_id=rm_id,
+                        warehouse_id=wh_id,
+                        status_id=st_id,
+                        rm_soh=qty,
+                        stock_recalculation_count=latest_count,
+                        date_computed=snapshot_date,
+                        is_imported=True,
+                        is_deleted=False
+                    )
+                )
 
-                def get_warehouse_id(warehouse_name):
-                    # Map sheet names to warehouse numbers
-                    warehouse_mapping = {
-                        "whse1": 1,
-                        "whse2": 2,
-                        "whse4": 4,
-                    }
+        # Batch insert all records in ONE atomic transaction
+        total_inserted = self.crud.bulk_insert_soh(new_soh_records)
 
-                    # Get the warehouse number corresponding to the sheet name
-                    warehouse_number = warehouse_mapping.get(warehouse_name.lower())
-
-                    if warehouse_number:
-                        # Query the database using the warehouse number
-                        warehouse_record = self.db.query(Warehouse.id).filter(
-                            Warehouse.wh_number == warehouse_number).first()
-                        return warehouse_record.id if warehouse_record else None
-                    return None
-
-                # Get the latest count
-                latest_count = get_latest_count()
-
-                # Process each sheet
-                for sheet_name, data in df.items():
-                    if sheet_name in ['WHSE1', 'WHSE2', 'WHSE4']:
-
-                        # Extract the date from the column header (first column name)
-                        snapshot_date = None
-                        try:
-                            raw_value = str(data.columns[0]).strip()  # Get the first column header as a string
-                            snapshot_date = pd.to_datetime(raw_value, errors='coerce').date()  # Convert to date
-
-                            if pd.isna(snapshot_date):
-                                raise ValueError(
-                                    f"Invalid date format in column header: {raw_value}")  # Raise error for debugging
-
-                        except Exception as e:
-                            raise HTTPException(status_code=400,
-                                                detail=f"Invalid date format in column header of {sheet_name}: {str(e)}")
-
-                        # Rename columns manually (shift column names down since the first row is actual data)
-                        data.columns = data.iloc[0]  # Set first row as column headers
-                        data = data[0:].reset_index(drop=True)  # Drop first row and reset index
-
-                        # Check the number of columns and assign column names accordingly
-                        if len(data.columns) == 6:
-                            data.columns = ["A", "B", "C", "D", "E", "F"]  # Adjust for 6 columns
-                        elif len(data.columns) == 7:
-                            data.columns = ["A", "B", "C", "D", "E", "F", "G"]  # Adjust for 7 columns
-                        else:
-                            raise ValueError(
-                                f"Unexpected number of columns in WHSE# sheet in the Excel File: {len(data.columns)}")  # Raise an error if the column count is neither 6 nor 7
-
-                        # Process specific columns (A, E, F) for each warehouse sheet
-                        for _, row in data.iterrows():
-
-                            rm_code = row.get('A', None)  # Use .get() to avoid KeyErrors
-                            total = row.get('E', 0)  # Default to 0 if missing
-                            status = row.get('F', None)  # Default to 'Unknown' if missing
-
-
-                            # Convert the status into good if they are blank in the excel
-                            if pd.isna(status):
-                                status = "good"
-
-
-                            # Get relevant IDs
-                            rm_code_id = get_rm_code_id(rm_code)
-                            status_id = get_status_id(status)
-                            warehouse_id = get_warehouse_id(sheet_name.lower())
-
-                            # Insert the data into the StockOnHand table
-                            StockOnHandCRUD(self.db).import_rm_soh(rm_code_id, total, status_id, warehouse_id, snapshot_date, latest_count)
-
-            except HTTPException as e:
-                raise e  # Pass FastAPI errors directly
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
-
-
-
-
+        return {
+            "message": "Stock on Hand data imported successfully.",
+            "records_imported": total_inserted,
+            "recalculation_count": latest_count
+        }
