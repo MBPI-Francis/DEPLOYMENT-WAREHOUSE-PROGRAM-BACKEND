@@ -11,7 +11,7 @@ from sqlalchemy.sql import func
 
 from core.base import BaseRepository
 from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_raw_materials.v1.schemas import RawMaterialCreate
+from api_rm_inv.api_raw_materials.v1.schemas import RawMaterialCreate, RawMaterialUpdate
 from shared.users.models import User
 
 
@@ -129,3 +129,14 @@ class RawMaterialCRUD(BaseRepository):
             self.db.commit()
 
         return len(new_records), skipped_count
+
+    def update(self, item: RawMaterial, payload: RawMaterialUpdate) -> RawMaterial:
+        """Applies field updates to an existing RawMaterial record."""
+        update_fields = payload.model_dump(exclude_unset=True)
+        for field, value in update_fields.items():
+            if field != "new_rm_code":  # handled in service if renaming code
+                setattr(item, field, value)
+
+        self.db.commit()
+        self.db.refresh(item)
+        return item

@@ -97,6 +97,9 @@ app.include_router(
     dependencies=[Depends(get_current_user)]  # 🔒 Blocks any request without a valid token!
 )
 
+from shared.audit.router import router as global_audit_router
+app.include_router(global_audit_router)
+
 # 3. Finished Goods Inventory API (Future placeholder)
 # from api_fg_inv.router import fg_router
 # app.include_router(fg_router, prefix="/api/v1/fg")

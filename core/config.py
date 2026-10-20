@@ -2,11 +2,12 @@
 Application Configuration Module.
 
 Centralizes environment variables, database connection strings,
-connection pool parameters, and network compression thresholds.
+connection pool parameters, security settings, departmental schema namespaces,
+and network compression thresholds.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -22,8 +23,16 @@ class Settings:
         "postgresql://postgres:mbpi@localhost:5433/mbpi_erp_db"
     )
 
-    # Dedicated schema for Raw Material Warehouse
+    # Dedicated schema for Raw Material Warehouse (Active Module)
     DB_SCHEMA: str = os.getenv("DB_SCHEMA", "schema_whrm")
+
+    # -----------------------------------------------------------------------
+    # Future Departmental Schema Namespaces (Single Database, Isolated Schemas)
+    # -----------------------------------------------------------------------
+    SCHEMA_RM: str = os.getenv("SCHEMA_RM", "schema_whrm")      # Raw Materials Warehouse
+    SCHEMA_FG: str = os.getenv("SCHEMA_FG", "schema_whfg")      # Finished Goods Warehouse
+    SCHEMA_PROD: str = os.getenv("SCHEMA_PROD", "schema_prod")  # Production & Batch Runs
+    SCHEMA_LAB: str = os.getenv("SCHEMA_LAB", "schema_labqc")   # Quality Control & Lab
 
     # -----------------------------------------------------------------------
     # Database Connection Pool Tuning (High-Concurrency LAN)
@@ -46,12 +55,22 @@ class Settings:
         r"C:\Program Files\PostgreSQL\16\bin\pg_dump.exe"
     )
 
-
+    # -----------------------------------------------------------------------
     # JWT Authentication & Security Configuration (Runs 100% Offline / LAN)
     # -----------------------------------------------------------------------
-    # Change this random string to your company's private secret passphrase
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "mbpi-secret-key-plant-operations-2026-secure-token-lan")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 720  # 12 hours (1 full shift)
-    
+
+    # -----------------------------------------------------------------------
+    # Service Account API Keys for Program-to-Program Integration
+    # -----------------------------------------------------------------------
+    # Using field(default_factory=...) to comply with Python dataclass standards
+    SERVICE_API_KEYS: dict = field(default_factory=lambda: {
+        "mbpi-prod-secret-key-2026": "service_production_app",
+        "mbpi-lab-secret-key-2026": "service_lab_program",
+        "mbpi-fg-secret-key-2026": "service_finished_goods_app",
+    })
+
+
 settings = Settings()

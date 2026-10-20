@@ -8,7 +8,7 @@ and Excel bulk-import workflows.
 import io
 from typing import List, Dict, Any
 import pandas as pd
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 
 from core.base import BaseService
 from api_rm_inv.api_raw_materials.v1.crud import RawMaterialCRUD
@@ -19,6 +19,8 @@ from api_rm_inv.api_raw_materials.v1.schemas import (
     TransformedRawMaterialResponse,
     MessageResponse
 )
+from core.logger import AuditLogger
+from shared.users.models import User
 
 
 class RawMaterialService(BaseService):
@@ -28,19 +30,31 @@ class RawMaterialService(BaseService):
         super().__init__(db)
         self.crud = RawMaterialCRUD(db)
 
-    def register_material(self, payload: RawMaterialCreate) -> RawMaterialResponse:
-        """
-        Validates that a material code is unique before saving.
-        Raises HTTP 409 Conflict if the code already exists.
-        """
+    def register_material(self, payload: RawMaterialCreate, request: Request,
+                          current_user: User) -> RawMaterialResponse:
         existing = self.crud.get_by_code(payload.rm_code, include_deleted=True)
         if existing:
-            status_text = "soft-deleted" if existing.is_deleted else "active"
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Raw material code '{payload.rm_code}' already exists in the catalog ({status_text})."
+                detail=f"Raw material code '{payload.rm_code}' already exists."
             )
-        return self.crud.create(payload)
+
+        # 1. Perform database write
+        created_record = self.crud.create(payload)
+
+        # 2. Record audit log entry
+        AuditLogger.log_action(
+            db=self.db,
+            request=request,
+            current_user=current_user,
+            module="RM_INVENTORY",
+            action="INSERT",
+            table_name="tbl_raw_materials",
+            record_id=created_record.id,
+            payload=payload
+        )
+
+        return created_record
 
     def get_material_by_code(self, rm_code: str) -> RawMaterialResponse:
         """Fetches an active material by its code or raises HTTP 404 Not Found."""
@@ -60,10 +74,15 @@ class RawMaterialService(BaseService):
         """Retrieves active raw materials formatted with user audit metadata."""
         return self.crud.get_all_transformed()
 
-    def update_material_by_code(self, rm_code: str, payload: RawMaterialUpdate) -> RawMaterialResponse:
+    def update_material_by_code(
+            self,
+            rm_code: str,
+            payload: RawMaterialUpdate,
+            request: Request,
+            current_user: User
+    ) -> RawMaterialResponse:
         """
         Updates an existing raw material identified by its human-readable code.
-        If the code itself is being renamed via 'new_rm_code', checks for collisions first.
         """
         material = self.crud.get_by_code(rm_code)
         if not material:
@@ -90,43 +109,63 @@ class RawMaterialService(BaseService):
             material.description = payload.description
         if payload.type is not None:
             material.type = payload.type
-        if payload.updated_by_id is not None:
-            material.updated_by_id = payload.updated_by_id
+
+        # Track who updated it
+        material.updated_by_id = current_user.id
 
         self.db.commit()
         self.db.refresh(material)
+
+        # Record UPDATE event in the global audit log
+        AuditLogger.log_action(
+            db=self.db,
+            request=request,
+            current_user=current_user,
+            module="RM_INVENTORY",
+            action="UPDATE",
+            table_name="tbl_raw_materials",
+            record_id=material.id,
+            payload=payload
+        )
+
         return material
 
-    def soft_delete_material_by_code(self, rm_code: str) -> MessageResponse:
-        """
-        Marks a raw material as deleted using its code so historical transaction
-        records remain intact.
-        """
+    def soft_delete_material_by_code(self, rm_code: str, request: Request, current_user: User):
         material = self.crud.get_by_code(rm_code)
         if not material:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Raw material '{rm_code}' was not found or is already deleted."
-            )
-        self.crud.set_deleted_flag(material, is_deleted=True)
-        return MessageResponse(
-            message=f"Raw material '{rm_code}' was successfully soft-deleted.",
-            rm_code=rm_code
+            raise HTTPException(status_code=404, detail=f"Material '{rm_code}' not found.")
+
+        # 1. Perform database update
+        self.crud.set_deleted_flag(material, is_deleted=True, user_id=current_user.id)
+
+        # 2. Record audit log entry for soft delete
+        AuditLogger.log_action(
+            db=self.db,
+            request=request,
+            current_user=current_user,
+            module="RM_INVENTORY",
+            action="SOFT_DELETE",
+            table_name="tbl_raw_materials",
+            record_id=material.id,
+            payload={"rm_code": rm_code, "action": "soft_delete"}
         )
 
-    def restore_material_by_code(self, rm_code: str) -> MessageResponse:
-        """Restores a soft-deleted raw material using its code."""
+        return {"message": f"Raw material '{rm_code}' was successfully soft-deleted.", "rm_code": rm_code}
+
+    def restore_material_by_code(self, rm_code: str, request: Request, current_user: User):
         material = self.crud.get_by_code(rm_code, include_deleted=True)
         if not material or not material.is_deleted:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Raw material '{rm_code}' is not in a deleted state."
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Material '{rm_code}' is not deleted.")
+
         self.crud.set_deleted_flag(material, is_deleted=False)
-        return MessageResponse(
-            message=f"Raw material '{rm_code}' has been restored to active status.",
-            rm_code=rm_code
+
+        # Log RESTORE event
+        AuditLogger.log_action(
+            db=self.db, request=request, current_user=current_user,
+            module="RM_INVENTORY", action="RESTORE",
+            table_name="tbl_raw_materials", record_id=material.id, payload={"rm_code": rm_code}
         )
+        return {"message": f"Raw material '{rm_code}' has been restored to active status.", "rm_code": rm_code}
 
     def process_excel_import(self, file_bytes: bytes) -> Dict[str, Any]:
         """
