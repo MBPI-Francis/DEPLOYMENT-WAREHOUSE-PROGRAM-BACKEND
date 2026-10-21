@@ -16,12 +16,14 @@ Provides:
    - PUT /restore/{preparation_form_id}/
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
 from api_rm_inv.api_preparation_form.v1.schemas import (
     PrepLookupResponse,
     PrepFormSubmissionRequest,
@@ -32,12 +34,11 @@ from api_rm_inv.api_preparation_form.v1.schemas import (
 )
 from api_rm_inv.api_preparation_form.v1.service import PrepIntegrationService
 
-# Note: Mounting both prefixes ensures zero downtime for legacy desktop clients
 router = APIRouter(prefix="/api/v1/rm/preparation-forms", tags=["Preparation Forms"])
 
 
 # ===========================================================================
-# 1. Traveler Integration Endpoints (Preserved Exactly As Working)
+# 1. Traveler Integration Endpoints
 # ===========================================================================
 
 @router.get(
@@ -80,106 +81,124 @@ def get_worksheet_by_lot(
 )
 def confirm_and_deduct(
     payload: PrepFormSubmissionRequest,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Executes atomic commit updating schema_whprep and inserting into schema_whrm."""
     service = PrepIntegrationService(db)
-    return service.confirm_and_deduct_inventory(payload)
+    return service.confirm_and_deduct_inventory(payload, request, current_user)
 
 
 # ===========================================================================
-# 2. Ledger Maintenance Endpoints (Restored & Upgraded CRUD)
+# 2. Ledger Maintenance Endpoints
 # ===========================================================================
 
 @router.post(
     "/create/",
+    response_model=TempPreparationFormResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Manually create a preparation deduction entry"
 )
 def create_preparation_form(
     payload: TempPreparationFormCreate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Creates a preparation deduction row. Accepts human codes (rm_code, wh_number, status_name)."""
+    """Creates a preparation deduction row and records an audit log atomically."""
     service = PrepIntegrationService(db)
-    result = service.create_preparation_entry(payload)
-    return {"message": "Preparation deduction recorded successfully.", "id": result.id, "ref_number": result.ref_number}
+    return service.create_preparation_entry(payload, request, current_user)
 
 
 @router.get(
     "/list/",
-    response_model=List[TempPreparationFormResponse],
-    summary="List active preparation deduction entries"
+    response_model=List[Dict[str, Any]],
+    summary="List active preparation deduction entries (Paginated)"
 )
-def read_active_preparation_forms(db: Session = Depends(get_db)):
-    """Retrieves all active, non-cleared deduction records for desktop preparation tables."""
+def read_active_preparation_forms(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated active, non-cleared deduction records."""
     service = PrepIntegrationService(db)
-    return service.get_active_preparation_list()
+    return service.get_active_preparation_list(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/deleted/",
-    response_model=List[TempPreparationFormResponse],
-    summary="List soft-deleted preparation deduction entries"
+    response_model=List[Dict[str, Any]],
+    summary="List soft-deleted preparation deduction entries (Paginated)"
 )
-def read_deleted_preparation_forms(db: Session = Depends(get_db)):
-    """Retrieves all soft-deleted records for auditing or restoration."""
+def read_deleted_preparation_forms(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated soft-deleted records for auditing or restoration."""
     service = PrepIntegrationService(db)
-    return service.get_deleted_preparation_list()
+    return service.get_deleted_preparation_list(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/historical/",
-    response_model=List[TempPreparationFormResponse],
-    summary="List historical computed preparation forms"
+    response_model=List[Dict[str, Any]],
+    summary="List historical computed preparation forms (Paginated)"
 )
 def read_historical_preparation_forms(
     record_id: Optional[str] = Query(None, description="Optional UUID to filter single historical row"),
+    limit: int = Query(50, ge=1, le=500, description="Max records to return"),
+    offset: int = Query(0, ge=0, description="Records to skip"),
     db: Session = Depends(get_db)
 ):
     """Retrieves historical records that have already been computed into ending balances."""
     service = PrepIntegrationService(db)
-    return service.get_historical_preparation_list(record_id)
+    return service.get_historical_preparation_list(record_id=record_id, limit=limit, offset=offset)
 
 
 @router.put(
     "/update/{preparation_form_id}/",
-    response_model=List[TempPreparationFormResponse],
+    response_model=TempPreparationFormResponse,
     summary="Update an existing preparation form entry"
 )
 def update_preparation_form(
     preparation_form_id: UUID,
     payload: TempPreparationFormUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Updates fields on an existing deduction entry and returns the refreshed active list."""
+    """Updates fields on an existing deduction entry and records an audit log atomically."""
     service = PrepIntegrationService(db)
-    return service.update_preparation_entry(preparation_form_id, payload)
+    return service.update_preparation_entry(preparation_form_id, payload, request, current_user)
 
 
 @router.delete(
     "/delete/{preparation_form_id}/",
-    response_model=List[TempPreparationFormResponse],
     summary="Soft-delete a preparation form entry"
 )
 def delete_preparation_form(
     preparation_form_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Soft-deletes an entry and returns the refreshed active list."""
+    """Soft-deletes an entry and records the audit trail atomically."""
     service = PrepIntegrationService(db)
-    return service.soft_delete_preparation_entry(preparation_form_id)
+    return service.soft_delete_preparation_entry(preparation_form_id, request, current_user)
 
 
 @router.put(
     "/restore/{preparation_form_id}/",
-    response_model=List[TempPreparationFormResponse],
     summary="Restore a soft-deleted preparation form entry"
 )
 def restore_preparation_form(
     preparation_form_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Restores a soft-deleted entry and returns the refreshed active list."""
+    """Restores a soft-deleted entry and records the audit trail atomically."""
     service = PrepIntegrationService(db)
-    return service.restore_preparation_entry(preparation_form_id)
+    return service.restore_preparation_entry(preparation_form_id, request, current_user)

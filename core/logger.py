@@ -34,24 +34,24 @@ class AuditLogger:
 
     @staticmethod
     def log_action(
-        db: Session,
-        request: Request,
-        current_user: User,
-        module: str,      # e.g., 'RM_INVENTORY'
-        action: str,      # 'INSERT', 'UPDATE', 'SOFT_DELETE', 'RESTORE'
-        table_name: str,  # e.g., 'tbl_receiving_reports'
-        record_id: UUID,  # Primary key of the affected record
-        payload: Optional[Any] = None
+            db: Session,
+            request: Request,
+            current_user: User,
+            module: str,  # e.g., 'RM_INVENTORY'
+            action: str,  # 'INSERT', 'UPDATE', 'SOFT_DELETE', 'RESTORE'
+            table_name: str,  # e.g., 'tbl_raw_materials'
+            record_id: UUID,  # Primary key of the affected record
+            payload: Optional[Any] = None
     ) -> None:
         """
-        Queues a detailed audit log entry into the current SQLAlchemy transaction session.
-        - If the parent transaction commits successfully: The audit log is permanently saved.
-        - If the parent transaction rolls back due to an error: The audit log is discarded automatically.
+        Records a detailed audit log entry into schema_master.tbl_system_audit_logs
+        and commits immediately.
         """
         try:
-            client_ip = request.client.host if request.client else "127.0.0.1"
+            client_ip = request.client.host if (request and request.client) else "127.0.0.1"
             workstation = getattr(current_user, "workstation_name", None) or "UNKNOWN-PC"
 
+            # Convert payload to dict
             snapshot = None
             if payload is not None:
                 if hasattr(payload, "model_dump"):
@@ -59,24 +59,29 @@ class AuditLogger:
                 elif hasattr(payload, "dict"):
                     snapshot = payload.dict()
                 elif isinstance(payload, dict):
-                    snapshot = payload
+                    snapshot = payload.copy()
+
+            # 🟢 AUTOMATIC OVERWRITE: If the snapshot has created_by_id or updated_by_id,
+            # guarantee it holds the real authenticated user ID (never a dummy Swagger UUID)!
+            if isinstance(snapshot, dict):
+                if action == "INSERT" and "created_by_id" in snapshot:
+                    snapshot["created_by_id"] = str(current_user.id)
+                elif action == "UPDATE" and "updated_by_id" in snapshot:
+                    snapshot["updated_by_id"] = str(current_user.id)
 
             payload_json = json.dumps(snapshot, default=_json_serial) if snapshot else "{}"
 
-            # We use db.execute() WITHOUT calling db.commit() here! 
-            # This makes the audit log part of the active transaction. 
-            # If the service calls db.commit(), the audit commits. If it calls db.rollback(), it rolls back.
             insert_sql = text("""
-                INSERT INTO schema_master.tbl_system_audit_logs (
-                    timestamp, module, user_id, username, role, department, 
-                    ip_address, workstation_name, action, table_name, 
-                    record_id, payload_snapshot
-                ) VALUES (
-                    NOW(), :module, :user_id, :username, :role, :department,
-                    :ip_address, :workstation_name, :action, :table_name,
-                    :record_id, CAST(:payload_snapshot AS JSONB)
-                )
-            """)
+                    INSERT INTO schema_master.tbl_system_audit_logs (
+                        timestamp, module, user_id, username, role, department, 
+                        ip_address, workstation_name, action, table_name, 
+                        record_id, payload_snapshot
+                    ) VALUES (
+                        NOW(), :module, :user_id, :username, :role, :department,
+                        :ip_address, :workstation_name, :action, :table_name,
+                        :record_id, CAST(:payload_snapshot AS JSONB)
+                    )
+                """)
 
             db.execute(insert_sql, {
                 "module": module.upper(),
@@ -91,6 +96,12 @@ class AuditLogger:
                 "record_id": record_id,
                 "payload_snapshot": payload_json
             })
-            # NOTE: No explicit db.commit() here. It shares the transaction with the service!
+
+            # Commit the audit entry permanently to PostgreSQL!
+            db.commit()
+            print(
+                f"[AUDIT LOG SUCCESS] Logged {action} on {table_name} (Record ID: {record_id}) for user '{current_user.username}'")
+
         except Exception as err:
-            print(f"[AUDIT LOG WARNING] Failed to queue audit trail: {str(err)}")
+            db.rollback()
+            print(f"[AUDIT LOG ERROR] Failed to write audit log: {str(err)}")

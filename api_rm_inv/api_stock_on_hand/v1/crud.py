@@ -3,10 +3,11 @@ Data Access Layer (CRUD) for Stock on Hand Module.
 
 Contains direct queries, paginated historical balance listings,
 and bulk database insertion utilities in schema_whrm.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, and_, func
 
@@ -47,13 +48,12 @@ class StockOnHandCRUD(BaseRepository):
         return self.db.query(StockOnHand).filter(StockOnHand.id == soh_id).first()
 
     def create(self, record: StockOnHand) -> StockOnHand:
-        """Persists a new SOH record."""
+        """Stages a new SOH record in the active transaction."""
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
         return record
 
-    def list_all_paginated(self, limit: int = 100, offset: int = 0) -> List[dict]:
+    def list_all_paginated(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """
         Retrieves active SOH baseline records with pagination to prevent
         loading hundreds of thousands of rows into memory simultaneously.
@@ -94,7 +94,7 @@ class StockOnHandCRUD(BaseRepository):
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
+    ) -> List[Dict[str, Any]]:
         """
         Retrieves computed historical SOH records with multi-field filtering
         and pagination. Converts rows to dictionaries for high serialization throughput.
@@ -147,9 +147,9 @@ class StockOnHandCRUD(BaseRepository):
         return [dict(row._mapping) for row in records]
 
     def bulk_insert_soh(self, records: List[StockOnHand]) -> int:
-        """Batch-inserts a list of SOH objects in a single atomic transaction."""
+        """Batch-inserts a list of SOH objects in the session without committing early."""
         if not records:
             return 0
         self.db.bulk_save_objects(records)
-        self.db.commit()
+        self.db.flush()
         return len(records)

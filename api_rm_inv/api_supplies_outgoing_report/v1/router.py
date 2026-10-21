@@ -1,45 +1,133 @@
-from typing import Optional
+"""
+API Router for Supplies Outgoing Report Endpoints.
 
-from fastapi import APIRouter, Depends
-from api_rm_inv.api_supplies_outgoing_report.v1.schemas import SuppliesOutgoingFormCreate, SuppliesOutgoingFormUpdate, SuppliesOutgoingFormResponse, SuppliesOutgoingForm
-from api_rm_inv.api_supplies_outgoing_report.v1.service import SuppliesOutgoingFormService
-from api_rm_inv.settings.database import get_db
+All endpoints use synchronous 'def' to allow threadpool concurrency
+across LAN workstations and include limit/offset pagination.
+"""
+
+from typing import List, Optional, Dict, Any
 from uuid import UUID
+from fastapi import APIRouter, Depends, Query, status, Request
+from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/api/supplies_outgoing_reports/v1")
+from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
+from api_rm_inv.api_supplies_outgoing_report.v1.schemas import (
+    SuppliesOutgoingFormCreate,
+    SuppliesOutgoingFormUpdate,
+    SuppliesOutgoingFormResponse
+)
+from api_rm_inv.api_supplies_outgoing_report.v1.service import SuppliesOutgoingFormService
 
-@router.post("/create/", response_model=SuppliesOutgoingForm)
-async def create_outgoing_report(outgoing_report: SuppliesOutgoingFormCreate, db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).create_outgoing_report(outgoing_report)
-    return result
+router = APIRouter(prefix="/api/v1/rm/supplies-outgoing-reports", tags=["Supplies Outgoing Reports"])
 
-@router.get("/list/", response_model=list[SuppliesOutgoingFormResponse])
-async def read_outgoing_report(db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).get_outgoing_report()
-    return result
 
-@router.get("/list/deleted/", response_model=list[SuppliesOutgoingFormResponse])
-async def read_deleted_outgoing_report(db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).get_deleted_outgoing_report()
-    return result
+@router.post(
+    "/create/",
+    response_model=SuppliesOutgoingFormResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a supplies dispatch"
+)
+def create_outgoing_report(
+    payload: SuppliesOutgoingFormCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Records warehouse supplies dispatched out and logs the action atomically."""
+    service = SuppliesOutgoingFormService(db)
+    return service.create_outgoing_report(payload, request, current_user)
 
-@router.get("/list/historical/", response_model=list[SuppliesOutgoingFormResponse])
-async def read_historical_outgoing_report(record_id: Optional[str] = None, db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).get_historical_outgoing_report(record_id)
-    return result
 
-@router.put("/update/{outgoing_report_id}/", response_model=list[SuppliesOutgoingFormResponse])
-async def update_outgoing_report(outgoing_report_id: UUID, outgoing_report_update: SuppliesOutgoingFormUpdate, db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).update_outgoing_report(outgoing_report_id, outgoing_report_update)
-    return result
+@router.get(
+    "/list/",
+    response_model=List[Dict[str, Any]],
+    summary="List active supplies outgoing reports (Paginated)"
+)
+def read_outgoing_report(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated active, non-cleared supplies outgoing reports."""
+    service = SuppliesOutgoingFormService(db)
+    return service.get_outgoing_report(limit=limit, offset=offset)
 
-@router.put("/restore/{outgoing_report_id}/", response_model=SuppliesOutgoingFormResponse)
-async def restore_outgoing_report(outgoing_report_id: UUID,  db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).restore_outgoing_report(outgoing_report_id)
-    return result
 
-@router.delete("/delete/{outgoing_report_id}/", response_model=list[SuppliesOutgoingFormResponse])
-async def delete_outgoing_report(outgoing_report_id: UUID, db: get_db = Depends()):
-    result = SuppliesOutgoingFormService(db).soft_delete_outgoing_report(outgoing_report_id)
-    return result
+@router.get(
+    "/list/deleted/",
+    response_model=List[Dict[str, Any]],
+    summary="List soft-deleted supplies outgoing reports (Paginated)"
+)
+def read_deleted_outgoing_report(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated soft-deleted supplies outgoing reports."""
+    service = SuppliesOutgoingFormService(db)
+    return service.get_deleted_outgoing_report(limit=limit, offset=offset)
 
+
+@router.get(
+    "/list/historical/",
+    response_model=List[Dict[str, Any]],
+    summary="List historical computed supplies outgoing reports"
+)
+def read_historical_outgoing_report(
+    record_id: Optional[UUID] = Query(None, description="Optional record UUID filter"),
+    limit: int = Query(50, ge=1, le=500, description="Max records to return"),
+    offset: int = Query(0, ge=0, description="Records to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves computed historical supplies records with pagination."""
+    service = SuppliesOutgoingFormService(db)
+    return service.get_historical_outgoing_report(record_id=record_id, limit=limit, offset=offset)
+
+
+@router.put(
+    "/update/{outgoing_report_id}/",
+    response_model=SuppliesOutgoingFormResponse,
+    summary="Update a supplies outgoing report"
+)
+def update_outgoing_report(
+    outgoing_report_id: UUID,
+    payload: SuppliesOutgoingFormUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Updates an existing supplies dispatch and records an audit log atomically."""
+    service = SuppliesOutgoingFormService(db)
+    return service.update_outgoing_report(outgoing_report_id, payload, request, current_user)
+
+
+@router.delete(
+    "/delete/{outgoing_report_id}/",
+    summary="Soft-delete a supplies outgoing report"
+)
+def delete_outgoing_report(
+    outgoing_report_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Marks a supplies outgoing report as deleted without corrupting ledger balances."""
+    service = SuppliesOutgoingFormService(db)
+    return service.soft_delete_outgoing_report(outgoing_report_id, request, current_user)
+
+
+@router.put(
+    "/restore/{outgoing_report_id}/",
+    summary="Restore a soft-deleted supplies outgoing report"
+)
+def restore_outgoing_report(
+    outgoing_report_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Reactivates a previously soft-deleted supplies outgoing report."""
+    service = SuppliesOutgoingFormService(db)
+    return service.restore_outgoing_report(outgoing_report_id, request, current_user)

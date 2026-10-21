@@ -3,10 +3,11 @@ Data Access Layer (CRUD) for Form Entries Adjustments.
 
 Handles cross-table atomic updates, SOH provisioning, and joining
 all five corrected transaction types in schema_whrm.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional, Tuple
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, and_, func
 from sqlalchemy.orm import aliased
@@ -131,8 +132,8 @@ class AdjustmentFormCRUD(BaseRepository):
             AdjustmentFormCorrect.is_deleted.is_(False)
         ).first()
 
-    def list_active(self) -> List[dict]:
-        """Retrieves active, un-cleared form adjustments with joined readable names."""
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves active, un-cleared form adjustments with joined readable names and pagination."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
         CurrentStatus = aliased(Status, name="current_status")
@@ -183,12 +184,14 @@ class AdjustmentFormCRUD(BaseRepository):
                 or_(AdjustmentFormCorrect.is_deleted.is_(None), AdjustmentFormCorrect.is_deleted.is_(False))
             )
             .order_by(desc(AdjustmentFormCorrect.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
 
-    def list_deleted(self) -> List[dict]:
-        """Retrieves soft-deleted form adjustments for audit recovery."""
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves soft-deleted form adjustments for audit recovery with pagination."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
         CurrentStatus = aliased(Status, name="current_status")
@@ -235,6 +238,8 @@ class AdjustmentFormCRUD(BaseRepository):
             .outerjoin(User, AdjustmentFormCorrect.created_by_id == User.id)
             .filter(AdjustmentFormCorrect.is_deleted.is_(True))
             .order_by(desc(AdjustmentFormCorrect.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
@@ -247,8 +252,8 @@ class AdjustmentFormCRUD(BaseRepository):
         rm_code: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
-        """Retrieves computed historical adjustment records with pagination."""
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical adjustment records with pagination and multi-field filtering."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
         CurrentStatus = aliased(Status, name="current_status")

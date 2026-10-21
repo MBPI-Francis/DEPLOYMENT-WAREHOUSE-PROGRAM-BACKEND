@@ -2,12 +2,11 @@
 API Router for Raw Material Endpoints.
 
 All endpoints use standard 'def' (synchronous) so that database I/O runs
-in FastAPI's worker thread pool, preventing concurrent LAN clients from
-blocking the main asyncio event loop.
+in FastAPI's anyio worker thread pool, preventing LAN client freezes.
 """
 
 from typing import List
-from fastapi import APIRouter, Depends, UploadFile, File, status, HTTPException, Request
+from fastapi import APIRouter, Depends, UploadFile, File, status, HTTPException, Request, Query
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -37,7 +36,6 @@ def create_raw_material(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Registers a unique raw material item into the warehouse catalog."""
     service = RawMaterialService(db)
     return service.register_material(payload, request, current_user)
 
@@ -45,23 +43,29 @@ def create_raw_material(
 @router.get(
     "/list/",
     response_model=List[RawMaterialResponse],
-    summary="List all active raw materials"
+    summary="List all active raw materials (Paginated)"
 )
-def list_raw_materials(db: Session = Depends(get_db)):
-    """Retrieves all active raw materials sorted alphabetically by item code."""
+def list_raw_materials(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     service = RawMaterialService(db)
-    return service.get_all_materials()
+    return service.get_all_materials(limit=limit, offset=offset)
 
 
 @router.get(
     "/transformed_list/",
     response_model=List[TransformedRawMaterialResponse],
-    summary="List raw materials with creator details"
+    summary="List raw materials with creator details (Paginated)"
 )
-def list_transformed_raw_materials(db: Session = Depends(get_db)):
-    """Retrieves raw materials joined with the user full name who created each record."""
+def list_transformed_raw_materials(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     service = RawMaterialService(db)
-    return service.get_transformed_list()
+    return service.get_transformed_list(limit=limit, offset=offset)
 
 
 @router.get(
@@ -70,7 +74,6 @@ def list_transformed_raw_materials(db: Session = Depends(get_db)):
     summary="Find material by code"
 )
 def get_raw_material(rm_code: str, db: Session = Depends(get_db)):
-    """Looks up a single raw material by its exact material code."""
     service = RawMaterialService(db)
     return service.get_material_by_code(rm_code)
 
@@ -87,7 +90,6 @@ def update_raw_material(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Updates editable information on an existing raw material directly using its code."""
     service = RawMaterialService(db)
     return service.update_material_by_code(rm_code, payload, request, current_user)
 
@@ -103,7 +105,6 @@ def delete_raw_material(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Soft-deletes a raw material so historical transaction records remain intact."""
     service = RawMaterialService(db)
     return service.soft_delete_material_by_code(rm_code, request, current_user)
 
@@ -119,7 +120,6 @@ def restore_raw_material(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Reactivates a previously soft-deleted raw material back to active status."""
     service = RawMaterialService(db)
     return service.restore_material_by_code(rm_code, request, current_user)
 
@@ -129,14 +129,14 @@ def restore_raw_material(
     summary="Bulk import raw materials from Excel (.xlsx)"
 )
 def import_raw_materials(
+    request: Request,
     file: UploadFile = File(...),
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Parses an uploaded Excel sheet and imports unique raw materials in bulk.
-    Skips any codes that already exist in the database without failing the entire file.
+    Enforces a 10MB memory safety guard.
     """
     if not file.filename.endswith(".xlsx"):
         raise HTTPException(
@@ -144,6 +144,13 @@ def import_raw_materials(
             detail="Invalid file format. Please upload an Excel (.xlsx) file."
         )
 
-    content = file.file.read()
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 Megabytes
+    content = file.file.read(MAX_FILE_SIZE + 1)
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Excel file exceeds the 10MB limit."
+        )
+
     service = RawMaterialService(db)
     return service.process_excel_import(content, request, current_user)

@@ -3,10 +3,11 @@ Data Access Layer (CRUD) for Quality Status Change (Held) Forms.
 
 Queries schema_whrm.view_adjusted_ending_balance to verify available physical stock
 before allowing reclassifications, avoiding negative inventory balances.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, and_, func
 from sqlalchemy.orm import aliased
@@ -74,14 +75,13 @@ class TempHeldFormCRUD(BaseRepository):
         return self.db.query(TempHeldForm).filter(TempHeldForm.id == form_id).first()
 
     def create(self, record: TempHeldForm) -> TempHeldForm:
-        """Persists a new status change record."""
+        """Stages a new status change record in the active transaction."""
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
         return record
 
-    def list_active(self) -> List[dict]:
-        """Retrieves active, un-cleared status changes with joined readable names."""
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves active, un-cleared status changes with joined readable names and pagination."""
         CurrentStatus = aliased(Status, name="current_status")
         NewStatus = aliased(Status, name="new_status")
 
@@ -113,12 +113,14 @@ class TempHeldFormCRUD(BaseRepository):
                 or_(TempHeldForm.is_deleted.is_(None), TempHeldForm.is_deleted.is_(False))
             )
             .order_by(desc(TempHeldForm.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
 
-    def list_deleted(self) -> List[dict]:
-        """Retrieves soft-deleted status changes for auditing."""
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves soft-deleted status changes for auditing with pagination."""
         CurrentStatus = aliased(Status, name="current_status")
         NewStatus = aliased(Status, name="new_status")
 
@@ -145,6 +147,8 @@ class TempHeldFormCRUD(BaseRepository):
             .outerjoin(User, TempHeldForm.created_by_id == User.id)
             .filter(TempHeldForm.is_deleted.is_(True))
             .order_by(desc(TempHeldForm.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
@@ -160,11 +164,8 @@ class TempHeldFormCRUD(BaseRepository):
         new_status_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
-        """
-        Retrieves computed historical status change records with multi-field filtering
-        and pagination. Converts rows to dictionaries for high serialization throughput.
-        """
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical status changes with filtering and pagination."""
         CurrentStatus = aliased(Status, name="current_status")
         NewStatus = aliased(Status, name="new_status")
 

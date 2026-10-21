@@ -1,10 +1,11 @@
 """
 Data Access Layer (CRUD) for Warehouses.
 
-Contains direct SQLAlchemy database queries and writes, kept free of HTTP exceptions.
+Contains direct SQLAlchemy database queries and writes.
+Strictly free of manual commits and HTTP exceptions.
 """
 
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any
 from uuid import UUID
 from sqlalchemy.sql import func
 
@@ -25,9 +26,9 @@ class WarehouseCRUD(BaseRepository):
         return query.first()
 
     def get_by_number(self, wh_number: Union[str, int], include_deleted: bool = False) -> Optional[Warehouse]:
-        """Fetches a warehouse by its unique facility number (integer)."""
+        """Fetches a warehouse by its unique facility number (smallint)."""
         try:
-            target_int = int(wh_number)
+            target_int = int(str(wh_number).strip())
         except (ValueError, TypeError):
             return None
 
@@ -36,20 +37,30 @@ class WarehouseCRUD(BaseRepository):
             query = query.filter(Warehouse.is_deleted.is_(False))
         return query.first()
 
-    def get_all(self, include_deleted: bool = False) -> List[Warehouse]:
-        """Returns all warehouses ordered by facility number."""
+    def get_all(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        include_deleted: bool = False
+    ) -> List[Warehouse]:
+        """Returns paginated warehouses ordered by facility number."""
         query = self.db.query(Warehouse)
         if not include_deleted:
             query = query.filter(Warehouse.is_deleted.is_(False))
-        return query.order_by(Warehouse.wh_number.asc()).all()
+        return query.order_by(Warehouse.wh_number.asc()).limit(limit).offset(offset).all()
 
-    def get_all_transformed(self) -> List[dict]:
-        """Retrieves active warehouses joined with creator user details."""
-        return (
+    def get_all_transformed(
+        self,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Retrieves active warehouses joined with creator user details using dictionary mapping."""
+        rows = (
             self.db.query(
                 Warehouse.id,
                 Warehouse.wh_number,
                 Warehouse.wh_name,
+                Warehouse.description,
                 Warehouse.created_at,
                 Warehouse.updated_at,
                 func.concat(User.first_name, " ", User.last_name).label("created_by")
@@ -57,36 +68,43 @@ class WarehouseCRUD(BaseRepository):
             .outerjoin(User, User.id == Warehouse.created_by_id)
             .filter(Warehouse.is_deleted.is_(False))
             .order_by(Warehouse.wh_number.asc())
+            .limit(limit)
+            .offset(offset)
             .all()
         )
+        return [dict(row._mapping) for row in rows]
 
-    def create(self, payload: WarehouseCreate) -> Warehouse:
-        """Persists a new warehouse record."""
+    def create(self, payload: WarehouseCreate, user_id: Optional[UUID] = None) -> Warehouse:
+        """Stages a new warehouse record in the active transaction."""
+        effective_user_id = user_id or payload.created_by_id
+
         item = Warehouse(
-            wh_number=str(payload.wh_number).strip(),
+            wh_number=int(str(payload.wh_number).strip()),
             wh_name=payload.wh_name.strip(),
             description=payload.description,
-            created_by_id=payload.created_by_id
+            created_by_id=effective_user_id
         )
         self.db.add(item)
-        self.db.commit()
-        self.db.refresh(item)
+        self.db.flush()
         return item
 
-    def update(self, item: Warehouse, payload: WarehouseUpdate) -> Warehouse:
-        """Applies updates to an existing Warehouse record."""
+    def update(self, item: Warehouse, payload: WarehouseUpdate, user_id: Optional[UUID] = None) -> Warehouse:
+        """Applies updates to an existing Warehouse record in the session."""
         update_fields = payload.model_dump(exclude_unset=True)
         for field, value in update_fields.items():
             if field != "new_wh_number":
                 setattr(item, field, value)
 
-        self.db.commit()
-        self.db.refresh(item)
+        if user_id:
+            item.updated_by_id = user_id
+
+        self.db.flush()
         return item
 
-    def set_deleted_flag(self, item: Warehouse, is_deleted: bool) -> Warehouse:
-        """Toggles the soft-deleted state of a warehouse record."""
+    def set_deleted_flag(self, item: Warehouse, is_deleted: bool, user_id: Optional[UUID] = None) -> Warehouse:
+        """Toggles the soft-deleted state of a warehouse record in the session."""
         item.is_deleted = is_deleted
-        self.db.commit()
-        self.db.refresh(item)
+        if is_deleted and user_id:
+            item.deleted_by_id = user_id
+        self.db.flush()
         return item

@@ -4,22 +4,26 @@ Business Service Layer for Inventory Reports.
 Coordinates paginated report queries and high-speed two-sheet Excel workbook generation:
 - Sheet 1: Detailed Data (All transaction line items)
 - Sheet 2: Daily RM Summary (Pivot table aggregating net consumption/movement by material and day)
+Includes constant-memory streaming and export auditing.
 """
 
 from io import BytesIO
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import pandas as pd
 from datetime import datetime
+from fastapi import Request
+from sqlalchemy.orm import Session
 
 from core.base import BaseService
+from core.logger import AuditLogger
+from shared.users.models import User
 from api_rm_inv.api_reports.v1.crud import FormEntryCRUD
-from api_rm_inv.api_reports.v1.schemas import FormEntryResponse
 
 
 class FormEntryService(BaseService):
     """Business service coordinating inventory reports and Excel data pivots."""
 
-    def __init__(self, db):
+    def __init__(self, db: Session):
         super().__init__(db)
         self.crud = FormEntryCRUD(db)
 
@@ -33,7 +37,7 @@ class FormEntryService(BaseService):
         status: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
-    ) -> List[dict]:
+    ) -> List[Dict[str, Any]]:
         """Retrieves paginated ledger entries for the PyQt6 reporting grid."""
         return self.crud.get_form_entries(
             date_from=date_from,
@@ -48,6 +52,8 @@ class FormEntryService(BaseService):
 
     def export_form_entries_to_excel_file(
         self,
+        request: Request,
+        current_user: User,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         mat_code: Optional[str] = None,
@@ -56,10 +62,10 @@ class FormEntryService(BaseService):
         status: Optional[str] = None,
     ) -> BytesIO:
         """
-        Streams database records directly into a Pandas DataFrame to generate
+        Streams database records into a Pandas DataFrame to generate
         a two-sheet Excel file with detailed logs and an automated daily pivot table.
+        Uses constant-memory streaming mode to prevent RAM bloat.
         """
-        # 1. Fetch raw dictionaries directly (bypassing Pydantic overhead for 10x speed)
         raw_data = self.crud.get_form_entries_for_export(
             date_from=date_from,
             date_to=date_to,
@@ -67,6 +73,7 @@ class FormEntryService(BaseService):
             document_type=document_type,
             location=location,
             status=status,
+            max_rows=50000
         )
 
         excel_buffer = BytesIO()
@@ -84,7 +91,6 @@ class FormEntryService(BaseService):
         # -------------------------------------------------------------------
         # Automated Daily RM Summary Pivot Table Generation
         # -------------------------------------------------------------------
-
         df_detailed['date_reported'] = pd.to_datetime(df_detailed['date_reported'], errors='coerce')
         df_valid_dates = df_detailed.dropna(subset=['date_reported']).copy()
 
@@ -96,14 +102,12 @@ class FormEntryService(BaseService):
             excel_buffer.seek(0)
             return excel_buffer
 
-        # Convert Decimal objects to clean floats so Pandas handles numeric math natively
+        # Convert Decimal values to numeric floats for vectorized aggregation
         df_valid_dates['qty'] = pd.to_numeric(df_valid_dates['qty'], errors='coerce').fillna(0.0)
-
-        # Aggregate sum of quantity by Material Code and Day
         df_valid_dates['Date'] = df_valid_dates['date_reported'].dt.strftime('%m/%d/%Y')
+
         df_long = df_valid_dates.groupby(['mat_code', 'Date'])['qty'].sum().reset_index()
 
-        # Pivot into chronological matrix (now purely numeric float64)
         df_pivot = df_long.pivot_table(
             index='mat_code',
             columns='Date',
@@ -111,32 +115,56 @@ class FormEntryService(BaseService):
             fill_value=0.0
         ).sort_index(ascending=True)
 
-        # Chronologically sort the date column headers
         sorted_cols = pd.to_datetime(df_pivot.columns, format='%m/%d/%Y', errors='coerce').sort_values().dropna()
         sorted_col_names = sorted_cols.strftime('%m/%d/%Y').tolist()
         df_pivot = df_pivot[sorted_col_names].reset_index()
 
         # -------------------------------------------------------------------
-        # Write Excel Workbook with Formatting
+        # Write Excel Workbook with Constant-Memory Optimization
         # -------------------------------------------------------------------
-        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+        writer_options = {"constant_memory": True}
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter", engine_kwargs={"options": writer_options}) as writer:
             # Sheet 1: Detailed Logs
             df_detailed.to_excel(writer, index=False, sheet_name="Detailed Data")
 
             # Sheet 2: Daily Material Pivot
             df_pivot.to_excel(writer, index=False, sheet_name="Daily RM Summary")
 
-            # Auto-format column widths in xlsxwriter
             workbook = writer.book
             if 'Daily RM Summary' in writer.sheets:
                 summary_sheet = writer.sheets['Daily RM Summary']
-                summary_sheet.set_column(0, 0, 20)  # Material code column
+                summary_sheet.set_column(0, 0, 20)
                 for col_idx in range(1, len(df_pivot.columns)):
-                    summary_sheet.set_column(col_idx, col_idx, 14)  # Date columns
+                    summary_sheet.set_column(col_idx, col_idx, 14)
 
             if 'Detailed Data' in writer.sheets:
                 detail_sheet = writer.sheets['Detailed Data']
                 detail_sheet.set_column('A:H', 18)
+
+        # -------------------------------------------------------------------
+        # Audit Log Recording for Data Export Event
+        # -------------------------------------------------------------------
+        try:
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="EXPORT",
+                table_name="view_form_entries_log",
+                record_id=current_user.id,
+                payload={
+                    "records_exported": len(df_detailed),
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "mat_code": mat_code,
+                    "document_type": document_type
+                }
+            )
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            print(f"[AUDIT WARNING] Report export audit failed: {str(e)}")
 
         excel_buffer.seek(0)
         return excel_buffer

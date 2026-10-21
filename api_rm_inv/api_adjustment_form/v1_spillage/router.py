@@ -5,12 +5,14 @@ All endpoints use synchronous 'def' to allow threadpool concurrency
 across LAN workstations and include limit/offset pagination.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
 from api_rm_inv.api_adjustment_form.v1_spillage.schemas import (
     AdjustmentFormCreate,
     AdjustmentFormUpdate,
@@ -32,42 +34,51 @@ router = APIRouter(prefix="/api/v1/rm/adjustments/spillage", tags=["Adjustments 
 )
 def create_adjustment_form(
     payload: AdjustmentFormCreate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Records physical spillage loss from a warehouse.
     Validates stock availability in schema_whrm.view_adjusted_ending_balance.
-    Accepts human business keys: rm_code, wh_number, status_name.
     """
     service = AdjustmentFormService(db)
-    return service.create_adjustment_form(payload)
+    return service.create_adjustment_form(payload, request, current_user)
 
 
 @router.get(
     "/list/",
-    response_model=List[AdjustmentFormResponse],
-    summary="List active spillage forms"
+    response_model=List[Dict[str, Any]],
+    summary="List active spillage forms (Paginated)"
 )
-def read_adjustment_form(db: Session = Depends(get_db)):
+def read_adjustment_form(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves all active, non-cleared spillage entries for desktop UI tables."""
     service = AdjustmentFormService(db)
-    return service.get_adjustment_form()
+    return service.get_adjustment_form(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/deleted/",
-    response_model=List[AdjustmentFormResponse],
-    summary="List soft-deleted spillage forms"
+    response_model=List[Dict[str, Any]],
+    summary="List soft-deleted spillage forms (Paginated)"
 )
-def read_deleted_adjustment_form(db: Session = Depends(get_db)):
+def read_deleted_adjustment_form(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves soft-deleted spillage records for audit recovery."""
     service = AdjustmentFormService(db)
-    return service.get_deleted_adjustment_form()
+    return service.get_deleted_adjustment_form(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/historical/",
-    response_model=List[AdjustmentFormResponse],
+    response_model=List[Dict[str, Any]],
     summary="List historical computed spillage forms"
 )
 def read_historical_adjustment_form(
@@ -81,10 +92,7 @@ def read_historical_adjustment_form(
     offset: int = Query(0, ge=0, description="Records to skip for pagination"),
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieves computed historical spillage records with multi-field filtering
-    and pagination (defaults to 50 rows) to keep response times fast across the LAN.
-    """
+    """Retrieves computed historical spillage records with multi-field filtering and pagination."""
     service = AdjustmentFormService(db)
     return service.get_historical_adjustment_form(
         record_id=record_id,
@@ -100,7 +108,7 @@ def read_historical_adjustment_form(
 
 @router.put(
     "/update/{adjustment_form_id}/",
-    response_model=List[AdjustmentFormResponse],
+    response_model=AdjustmentFormResponse,
     summary="Update an existing spillage form",
     responses={
         404: {"description": "Spillage record not found"},
@@ -110,36 +118,40 @@ def read_historical_adjustment_form(
 def update_adjustment_form(
     adjustment_form_id: UUID,
     payload: AdjustmentFormUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Modifies an existing spillage record with live stock re-validation."""
     service = AdjustmentFormService(db)
-    return service.update_adjustment_form(adjustment_form_id, payload)
+    return service.update_adjustment_form(adjustment_form_id, payload, request, current_user)
 
 
 @router.delete(
     "/delete/{adjustment_form_id}/",
-    response_model=List[AdjustmentFormResponse],
     summary="Soft-delete a spillage form"
 )
 def delete_adjustment_form(
     adjustment_form_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Marks a spillage record as deleted without breaking inventory ledger calculations."""
     service = AdjustmentFormService(db)
-    return service.soft_delete_adjustment_form(adjustment_form_id)
+    return service.soft_delete_adjustment_form(adjustment_form_id, request, current_user)
 
 
 @router.put(
     "/restore/{adjustment_form_id}/",
-    response_model=List[AdjustmentFormResponse],
     summary="Restore a soft-deleted spillage form"
 )
 def restore_adjustment_form(
     adjustment_form_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Reactivates a previously soft-deleted spillage record after re-validating stock availability."""
     service = AdjustmentFormService(db)
-    return service.restore_adjustment_form(adjustment_form_id)
+    return service.restore_adjustment_form(adjustment_form_id, request, current_user)

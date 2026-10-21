@@ -1,177 +1,203 @@
-from api_rm_inv.api_status.v1.exceptions import StatusCreateException, StatusNotFoundException, \
-    StatusUpdateException, StatusSoftDeleteException, StatusRestoreException
-from api_rm_inv.api_status.v1.main import AppCRUD, AppService
-from api_rm_inv.api_status.v1.models import Status
-from api_rm_inv.api_status.v1.schemas import StatusCreate, StatusUpdate
-from api_rm_inv.api_users.v1.models import User
-from sqlalchemy.sql import func
+"""
+Business Service Layer for Quality Status Module.
+
+Coordinates status validation, renaming collision checks,
+atomic audit logging, and single-commit database transactions.
+"""
+
+from typing import List, Optional, Dict, Any
 from uuid import UUID
+from fastapi import HTTPException, status, Request
+from sqlalchemy.orm import Session
+
+from core.base import BaseService
+from core.logger import AuditLogger
+from shared.users.models import User
+from api_rm_inv.api_status.v1.crud import StatusCRUD
+from api_rm_inv.api_status.v1.schemas import (
+    StatusCreate,
+    StatusUpdate,
+    StatusResponse,
+    TransformedStatusResponse
+)
 
 
-# These are the code for the app to communicate to the database
-class StatusCRUD(AppCRUD):
-    def create_status(self, status: StatusCreate):
-        status_item = Status(name=status.name,
-                                   description=status.description,
-                                   updated_by_id=status.updated_by_id,
-                                   created_by_id=status.created_by_id)
-        self.db.add(status_item)
-        self.db.commit()
-        self.db.refresh(status_item)
-        return status_item
+class StatusService(BaseService):
+    """Business service coordinating quality status lookups and audit logging."""
 
-    def get_status(self):
-        status_item = self.db.query(Status).all()
-        if status_item:
-            return status_item
-        return []
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.crud = StatusCRUD(db)
 
-    # FIX THIS ERROR. THIS HAS ERROR
-    def get_status_by_name(self, name):
-        status = (
-            self.db.query(Status.id, Status.name)
-            .filter(Status.name == name)
-            .first()
-        )
-
-        if status:
-            # Filter only required fields
-            filtered_status = {
-                "id": status.id,
-                "name": status.name,
-            }
-
-            return filtered_status
-
-
-        return []  # Return None if no match is found
-
-    
-    
-    def all_transformed_status(self):
-        # Join tables
-        stmt = (
-            self.db.query(
-                Status.id,
-                Status.name,
-                Status.description,
-                Status.created_at,
-                Status.updated_at,
-                func.concat(User.first_name, " ", User.last_name).label("created_by")
+    def create_status(
+        self,
+        payload: StatusCreate,
+        request: Request,
+        current_user: User
+    ) -> StatusResponse:
+        """Validates unique status name and records audit trail atomically."""
+        existing = self.crud.get_by_name(payload.name, include_deleted=True)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Status '{payload.name}' already exists."
             )
-            .outerjoin(User,
-                       User.id == Status.created_by_id)  # Left join StockOnHand with ReceivingReport
-        )
 
-        # Return All the result
-        return stmt.all()
-
-
-    def update_status(self, status_id: UUID, status_update: StatusUpdate):
         try:
-            status = self.db.query(Status).filter(Status.id == status_id).first()
-            if not status or status.is_deleted:
-                raise StatusNotFoundException(detail="Drop List not found or already deleted.")
+            created = self.crud.create(payload, user_id=current_user.id)
 
-            for key, value in status_update.dict(exclude_unset=True).items():
-                setattr(status, key, value)
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="INSERT",
+                table_name="tbl_status",
+                record_id=created.id,
+                payload=payload
+            )
+
             self.db.commit()
-            self.db.refresh(status)
-            return status
+            self.db.refresh(created)
+            return created
 
         except Exception as e:
-            raise StatusUpdateException(detail=f"Error: {str(e)}")
+            self.db.rollback()
+            raise e
 
-    def soft_delete_status(self, status_id: UUID):
+    def get_status(self, limit: int = 100, offset: int = 0) -> List[StatusResponse]:
+        """Retrieves paginated active quality statuses."""
+        return self.crud.get_all(limit=limit, offset=offset)
+
+    def all_transformed_status(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated active statuses with creator audit metadata."""
+        return self.crud.get_all_transformed(limit=limit, offset=offset)
+
+    def get_status_by_name(self, name: str) -> Dict[str, Any]:
+        """Looks up a specific status by name."""
+        status_rec = self.crud.get_by_name(name)
+        if not status_rec:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Status '{name}' not found."
+            )
+        return {"id": status_rec.id, "name": status_rec.name}
+
+    def update_status_by_name(
+        self,
+        name: str,
+        payload: StatusUpdate,
+        request: Request,
+        current_user: User
+    ) -> StatusResponse:
+        """Updates quality status details and records audit trail atomically."""
+        status_rec = self.crud.get_by_name(name)
+        if not status_rec:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Status '{name}' not found."
+            )
+
+        if payload.new_name and payload.new_name.strip().lower() != status_rec.name.lower():
+            new_clean = payload.new_name.strip()
+            collision = self.crud.get_by_name(new_clean, include_deleted=True)
+            if collision:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Status name '{new_clean}' already taken."
+                )
+            status_rec.name = new_clean
+
         try:
-            status = self.db.query(Status).filter(Status.id == status_id).first()
-            if not status or status.is_deleted:
-                raise StatusNotFoundException(detail="Drop List not found or already deleted.")
+            updated = self.crud.update(status_rec, payload, user_id=current_user.id)
 
-            status.is_deleted = True
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="UPDATE",
+                table_name="tbl_status",
+                record_id=updated.id,
+                payload=payload
+            )
+
             self.db.commit()
-            self.db.refresh(status)
-            return status
+            self.db.refresh(updated)
+            return updated
 
         except Exception as e:
-            raise StatusSoftDeleteException(detail=f"Error: {str(e)}")
+            self.db.rollback()
+            raise e
 
+    def soft_delete_status_by_name(
+        self,
+        name: str,
+        request: Request,
+        current_user: User
+    ) -> StatusResponse:
+        """Soft-deletes a status record and logs the action atomically."""
+        status_rec = self.crud.get_by_name(name)
+        if not status_rec:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Status '{name}' not found."
+            )
 
-    def restore_status(self, status_id: UUID):
         try:
-            status = self.db.query(Status).filter(Status.id == status_id).first()
-            if not status or not status.is_deleted:
-                raise StatusNotFoundException(detail="Drop List not found or already restored.")
+            self.crud.set_deleted_flag(status_rec, is_deleted=True, user_id=current_user.id)
 
-            status.is_deleted = False
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="SOFT_DELETE",
+                table_name="tbl_status",
+                record_id=status_rec.id,
+                payload={"name": name, "action": "soft_delete"}
+            )
+
             self.db.commit()
-            self.db.refresh(status)
-            return status
+            self.db.refresh(status_rec)
+            return status_rec
 
         except Exception as e:
-            raise StatusRestoreException(detail=f"Error: {str(e)}")
+            self.db.rollback()
+            raise e
 
+    def restore_status_by_name(
+        self,
+        name: str,
+        request: Request,
+        current_user: User
+    ) -> StatusResponse:
+        """Restores a soft-deleted quality status atomically."""
+        status_rec = self.crud.get_by_name(name, include_deleted=True)
+        if not status_rec or not status_rec.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Status '{name}' is not in a deleted state."
+            )
 
-# These are the code for the business logic like calculation etc.
-class StatusService(AppService):
-    def create_status(self, item: StatusCreate):
         try:
-            status_item = StatusCRUD(self.db).create_status(item)
+            self.crud.set_deleted_flag(status_rec, is_deleted=False)
+
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="RESTORE",
+                table_name="tbl_status",
+                record_id=status_rec.id,
+                payload={"name": name, "action": "restore"}
+            )
+
+            self.db.commit()
+            self.db.refresh(status_rec)
+            return status_rec
 
         except Exception as e:
-            raise StatusCreateException(detail=f"Error: {str(e)}")
-
-
-        return status_item
-
-    def get_status(self):
-        try:
-            status_item = StatusCRUD(self.db).get_status()
-
-        except Exception as e:
-            raise StatusNotFoundException(detail=f"Error: {str(e)}")
-        return status_item
-
-
-    def get_status_by_name(self, name):
-        try:
-            status_item = StatusCRUD(self.db).get_status_by_name(name)
-
-            if not status_item:
-                raise StatusNotFoundException(detail="Status not found.")
-
-            return status_item
-
-        except Exception as e:
-            raise StatusNotFoundException(detail=f"Error: {str(e)}")
-
-    
-    
-    def all_transformed_status(self):
-        try:
-            warehouse_item = StatusCRUD(self.db).all_transformed_status()
-
-        except Exception as e:
-            raise StatusNotFoundException(detail=f"Error: {str(e)}")
-        return warehouse_item
-
-    # This is the service/business logic in updating the status.
-    def update_status(self, status_id: UUID, status_update: StatusUpdate):
-        status = StatusCRUD(self.db).update_status(status_id, status_update)
-        return status
-
-    # This is the service/business logic in soft deleting the status.
-    def soft_delete_status(self, status_id: UUID):
-        status = StatusCRUD(self.db).soft_delete_status(status_id)
-        return status
-
-
-    # This is the service/business logic in soft restoring the status.
-    def restore_status(self, status_id: UUID):
-        status = StatusCRUD(self.db).restore_status(status_id)
-        return status
-
-
-
-
-
+            self.db.rollback()
+            raise e

@@ -1,16 +1,18 @@
 """
-API Router for Outgoing Report Endpoints (v2).
+API Router for Outgoing Report Endpoints (v1).
 
 All endpoints use synchronous 'def' so database I/O runs in FastAPI's
 worker thread pool, preventing concurrent LAN clients from blocking the event loop.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
 from api_rm_inv.api_outgoing_report.v1.schemas import (
     OutgoingFormCreate,
     OutgoingFormUpdate,
@@ -32,42 +34,51 @@ router = APIRouter(prefix="/api/v1/rm/outgoing-reports", tags=["Outgoing Reports
 )
 def create_outgoing_report(
     payload: OutgoingFormCreate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Records material or supplies dispatched out of the plant.
     Validates stock availability in schema_whrm.view_adjusted_ending_balance.
-    Accepts human business keys: rm_code, wh_number, status_name.
     """
     service = TempOutgoingReportService(db)
-    return service.create_outgoing_report(payload)
+    return service.create_outgoing_report(payload, request, current_user)
 
 
 @router.get(
     "/list/",
-    response_model=List[OutgoingFormResponse],
-    summary="List active outgoing reports"
+    response_model=List[Dict[str, Any]],
+    summary="List active outgoing reports (Paginated)"
 )
-def read_outgoing_report(db: Session = Depends(get_db)):
+def read_outgoing_report(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves all active, non-cleared outgoing reports for desktop grid display."""
     service = TempOutgoingReportService(db)
-    return service.get_outgoing_report()
+    return service.get_outgoing_report(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/deleted/",
-    response_model=List[OutgoingFormResponse],
-    summary="List soft-deleted outgoing reports"
+    response_model=List[Dict[str, Any]],
+    summary="List soft-deleted outgoing reports (Paginated)"
 )
-def read_deleted_outgoing_report(db: Session = Depends(get_db)):
+def read_deleted_outgoing_report(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves soft-deleted outgoing reports for auditing and recovery."""
     service = TempOutgoingReportService(db)
-    return service.get_deleted_outgoing_report()
+    return service.get_deleted_outgoing_report(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/historical/",
-    response_model=List[OutgoingFormResponse],
+    response_model=List[Dict[str, Any]],
     summary="List historical computed outgoing reports"
 )
 def read_historical_outgoing_report(
@@ -82,10 +93,7 @@ def read_historical_outgoing_report(
     offset: int = Query(0, ge=0, description="Records to skip for pagination"),
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieves computed historical outgoing reports with multi-field filtering
-    and pagination (defaults to 50 rows) to keep response times fast across the LAN.
-    """
+    """Retrieves computed historical outgoing reports with multi-field filtering and pagination."""
     service = TempOutgoingReportService(db)
     return service.get_historical_outgoing_report(
         record_id=record_id,
@@ -102,7 +110,7 @@ def read_historical_outgoing_report(
 
 @router.put(
     "/update/{outgoing_report_id}/",
-    response_model=List[OutgoingFormResponse],
+    response_model=OutgoingFormResponse,
     summary="Update an existing outgoing report",
     responses={
         404: {"description": "Outgoing report not found"},
@@ -112,36 +120,40 @@ def read_historical_outgoing_report(
 def update_outgoing_report(
     outgoing_report_id: UUID,
     payload: OutgoingFormUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Modifies an existing outgoing report with stock re-validation."""
     service = TempOutgoingReportService(db)
-    return service.update_outgoing_report(outgoing_report_id, payload)
+    return service.update_outgoing_report(outgoing_report_id, payload, request, current_user)
 
 
 @router.delete(
     "/delete/{outgoing_report_id}/",
-    response_model=List[OutgoingFormResponse],
     summary="Soft-delete an outgoing report"
 )
 def delete_outgoing_report(
     outgoing_report_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Marks an outgoing report as deleted without breaking inventory ledger balances."""
     service = TempOutgoingReportService(db)
-    return service.soft_delete_outgoing_report(outgoing_report_id)
+    return service.soft_delete_outgoing_report(outgoing_report_id, request, current_user)
 
 
 @router.put(
     "/restore/{outgoing_report_id}/",
-    response_model=List[OutgoingFormResponse],
     summary="Restore a soft-deleted outgoing report"
 )
 def restore_outgoing_report(
     outgoing_report_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Reactivates a previously soft-deleted outgoing report after re-validating stock availability."""
     service = TempOutgoingReportService(db)
-    return service.restore_outgoing_report(outgoing_report_id)
+    return service.restore_outgoing_report(outgoing_report_id, request, current_user)

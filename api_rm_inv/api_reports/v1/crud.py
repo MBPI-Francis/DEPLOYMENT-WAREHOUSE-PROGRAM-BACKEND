@@ -3,6 +3,7 @@ Data Access Layer (CRUD) for Inventory Reports.
 
 Executes parameterized queries against schema_whrm.view_form_entries_log
 with pagination and fast dictionary mapping for large historical datasets.
+Strictly read-only and free of HTTP exceptions.
 """
 
 from typing import List, Optional, Dict, Any
@@ -24,7 +25,7 @@ class FormEntryCRUD(BaseRepository):
         status: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
-    ) -> List[dict]:
+    ) -> List[Dict[str, Any]]:
         """
         Retrieves paginated form entries matching multi-field filter criteria.
         Converts rows via mappings() for high serialization throughput.
@@ -42,7 +43,7 @@ class FormEntryCRUD(BaseRepository):
             FROM schema_whrm.view_form_entries_log
             WHERE is_deleted = FALSE
         """
-        params = {"limit": limit, "offset": offset}
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
 
         if date_from and date_to:
             query += " AND date_reported BETWEEN :date_from AND :date_to"
@@ -90,10 +91,10 @@ class FormEntryCRUD(BaseRepository):
         location: Optional[str] = None,
         status: Optional[str] = None,
         max_rows: int = 50000
-    ) -> List[dict]:
+    ) -> List[Dict[str, Any]]:
         """
         Retrieves raw dictionary records optimized for streaming into Pandas/Excel.
-        Bypasses Pydantic model instantiation overhead to minimize memory usage.
+        Enforces a maximum row ceiling to guarantee memory safety.
         """
         query = """
             SELECT
@@ -108,7 +109,7 @@ class FormEntryCRUD(BaseRepository):
             FROM schema_whrm.view_form_entries_log
             WHERE is_deleted = FALSE
         """
-        params = {"max_rows": max_rows}
+        params: Dict[str, Any] = {"max_rows": max_rows}
 
         if date_from and date_to:
             query += " AND date_reported BETWEEN :date_from AND :date_to"

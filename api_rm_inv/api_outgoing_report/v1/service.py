@@ -1,14 +1,16 @@
 """
-Business Service Layer for Outgoing Reports (v2).
+Business Service Layer for Outgoing Reports (v1).
 
 Coordinates data validation, business keys resolution (rm_code, wh_number, status_name),
-and stock availability verification against schema_whrm.view_adjusted_ending_balance.
+stock availability verification against schema_whrm.view_adjusted_ending_balance,
+and atomic audit trail recording.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
+from sqlalchemy.orm import Session
 
 from core.base import BaseService
 from api_rm_inv.api_outgoing_report.v1.crud import TempOutgoingReportCRUD
@@ -18,12 +20,14 @@ from api_rm_inv.api_outgoing_report.v1.schemas import (
     OutgoingFormUpdate,
     OutgoingFormResponse
 )
+from core.logger import AuditLogger
+from shared.users.models import User
 
 
 class TempOutgoingReportService(BaseService):
     """Business service coordinating outbound material dispatch workflows."""
 
-    def __init__(self, db):
+    def __init__(self, db: Session):
         super().__init__(db)
         self.crud = TempOutgoingReportCRUD(db)
 
@@ -60,10 +64,7 @@ class TempOutgoingReportService(BaseService):
                 detail=f"Quality status '{status_name}' does not exist."
             )
 
-        # Query live balance from view_adjusted_ending_balance
         live_stock = self.crud.get_available_stock(material.id, warehouse.id, st.id)
-
-        # On updates, add back previously dispatched quantity to prevent false overdrafts
         effective_stock = live_stock + existing_outgoing_qty
 
         if requested_qty > effective_stock:
@@ -78,10 +79,13 @@ class TempOutgoingReportService(BaseService):
 
         return material.id, warehouse.id, st.id
 
-    def create_outgoing_report(self, payload: OutgoingFormCreate) -> OutgoingFormResponse:
-        """
-        Validates origin stock availability and records an outbound dispatch.
-        """
+    def create_outgoing_report(
+        self,
+        payload: OutgoingFormCreate,
+        request: Request,
+        current_user: User
+    ) -> OutgoingFormResponse:
+        """Validates stock, stages outbound dispatch, and commits with audit log atomically."""
         rm_id, wh_id, st_id = self._resolve_and_validate_stock(
             rm_code=payload.rm_code,
             wh_number=payload.wh_number,
@@ -90,37 +94,49 @@ class TempOutgoingReportService(BaseService):
             existing_outgoing_qty=Decimal("0.00")
         )
 
-        record = TempOutgoingReport(
-            rm_code_id=rm_id,
-            warehouse_id=wh_id,
-            status_id=st_id,
-            ref_number=payload.ref_number.strip(),
-            outgoing_date=payload.outgoing_date,
-            qty_kg=payload.qty_kg,
-            outgoing_type=payload.outgoing_type.strip().upper(),
-            outgoing_destination=payload.outgoing_destination.strip() if payload.outgoing_destination else None,
-            created_by_id=payload.created_by_id,
-            is_deleted=False,
-            is_cleared=False,
-            is_adjusted=False
-        )
-        created = self.crud.create(record)
+        try:
+            record = TempOutgoingReport(
+                rm_code_id=rm_id,
+                warehouse_id=wh_id,
+                status_id=st_id,
+                ref_number=payload.ref_number.strip(),
+                outgoing_date=payload.outgoing_date,
+                qty_kg=payload.qty_kg,
+                outgoing_type=payload.outgoing_type.strip().upper(),
+                outgoing_destination=payload.outgoing_destination.strip() if payload.outgoing_destination else None,
+                created_by_id=current_user.id,
+                is_deleted=False,
+                is_cleared=False,
+                is_adjusted=False
+            )
+            created = self.crud.create(record)
 
-        # Return full formatted DTO
-        active_list = self.crud.list_active()
-        matched = next((item for item in active_list if item["id"] == created.id), None)
-        if matched:
-            return matched
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="INSERT",
+                table_name="tbl_outgoing_reports",
+                record_id=created.id,
+                payload=payload
+            )
 
-        return created
+            self.db.commit()
+            self.db.refresh(created)
+            return created
 
-    def get_outgoing_report(self) -> List[dict]:
-        """Retrieves active outgoing reports for desktop grid display."""
-        return self.crud.list_active()
+        except Exception as e:
+            self.db.rollback()
+            raise e
 
-    def get_deleted_outgoing_report(self) -> List[dict]:
-        """Retrieves soft-deleted outgoing reports for recovery."""
-        return self.crud.list_deleted()
+    def get_outgoing_report(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated active outgoing reports."""
+        return self.crud.list_active(limit=limit, offset=offset)
+
+    def get_deleted_outgoing_report(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated soft-deleted outgoing reports."""
+        return self.crud.list_deleted(limit=limit, offset=offset)
 
     def get_historical_outgoing_report(
         self,
@@ -133,7 +149,7 @@ class TempOutgoingReportService(BaseService):
         outgoing_type: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
+    ) -> List[Dict[str, Any]]:
         """Retrieves computed historical outgoing records matching filter parameters."""
         return self.crud.list_historical(
             record_id=record_id,
@@ -147,7 +163,13 @@ class TempOutgoingReportService(BaseService):
             offset=offset
         )
 
-    def update_outgoing_report(self, report_id: UUID, payload: OutgoingFormUpdate) -> List[dict]:
+    def update_outgoing_report(
+        self,
+        report_id: UUID,
+        payload: OutgoingFormUpdate,
+        request: Request,
+        current_user: User
+    ) -> OutgoingFormResponse:
         """Modifies an existing outgoing report with live stock availability re-validation."""
         record = self.crud.get_by_id(report_id)
         if not record or record.is_deleted:
@@ -169,27 +191,48 @@ class TempOutgoingReportService(BaseService):
             existing_outgoing_qty=record.qty_kg
         )
 
-        record.rm_code_id = rm_id
-        record.warehouse_id = wh_id
-        record.status_id = st_id
-        record.qty_kg = target_qty
+        try:
+            record.rm_code_id = rm_id
+            record.warehouse_id = wh_id
+            record.status_id = st_id
+            record.qty_kg = target_qty
+            record.updated_by_id = current_user.id
 
-        if payload.ref_number is not None:
-            record.ref_number = payload.ref_number.strip()
-        if payload.outgoing_date is not None:
-            record.outgoing_date = payload.outgoing_date
-        if payload.outgoing_type is not None:
-            record.outgoing_type = payload.outgoing_type.strip().upper()
-        if payload.outgoing_destination is not None:
-            record.outgoing_destination = payload.outgoing_destination.strip()
-        if payload.updated_by_id is not None:
-            record.updated_by_id = payload.updated_by_id
+            if payload.ref_number is not None:
+                record.ref_number = payload.ref_number.strip()
+            if payload.outgoing_date is not None:
+                record.outgoing_date = payload.outgoing_date
+            if payload.outgoing_type is not None:
+                record.outgoing_type = payload.outgoing_type.strip().upper()
+            if payload.outgoing_destination is not None:
+                record.outgoing_destination = payload.outgoing_destination.strip()
 
-        self.db.commit()
-        return self.crud.list_active()
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="UPDATE",
+                table_name="tbl_outgoing_reports",
+                record_id=record.id,
+                payload=payload
+            )
 
-    def soft_delete_outgoing_report(self, report_id: UUID) -> List[dict]:
-        """Soft-deletes an outgoing report and returns the refreshed active list."""
+            self.db.commit()
+            self.db.refresh(record)
+            return record
+
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def soft_delete_outgoing_report(
+        self,
+        report_id: UUID,
+        request: Request,
+        current_user: User
+    ) -> Dict[str, Any]:
+        """Soft-deletes an outgoing report and records an audit log atomically."""
         record = self.crud.get_by_id(report_id)
         if not record or record.is_deleted:
             raise HTTPException(
@@ -197,11 +240,34 @@ class TempOutgoingReportService(BaseService):
                 detail="Outgoing Report not found or already deleted."
             )
 
-        record.is_deleted = True
-        self.db.commit()
-        return self.crud.list_active()
+        try:
+            record.is_deleted = True
+            record.deleted_by_id = current_user.id
 
-    def restore_outgoing_report(self, report_id: UUID) -> List[dict]:
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="SOFT_DELETE",
+                table_name="tbl_outgoing_reports",
+                record_id=record.id,
+                payload={"ref_number": record.ref_number, "action": "soft_delete"}
+            )
+
+            self.db.commit()
+            return {"message": "Outgoing report soft-deleted successfully.", "id": str(report_id)}
+
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def restore_outgoing_report(
+        self,
+        report_id: UUID,
+        request: Request,
+        current_user: User
+    ) -> Dict[str, Any]:
         """Restores a soft-deleted outgoing report after re-validating stock availability."""
         record = self.crud.get_by_id(report_id)
         if not record or not record.is_deleted:
@@ -219,6 +285,23 @@ class TempOutgoingReportService(BaseService):
             existing_outgoing_qty=Decimal("0.00")
         )
 
-        record.is_deleted = False
-        self.db.commit()
-        return self.crud.list_active()
+        try:
+            record.is_deleted = False
+
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="RESTORE",
+                table_name="tbl_outgoing_reports",
+                record_id=record.id,
+                payload={"ref_number": record.ref_number, "action": "restore"}
+            )
+
+            self.db.commit()
+            return {"message": "Outgoing report restored successfully.", "id": str(report_id)}
+
+        except Exception as e:
+            self.db.rollback()
+            raise e

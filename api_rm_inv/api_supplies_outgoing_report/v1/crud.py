@@ -1,194 +1,158 @@
-from api_rm_inv.api_supplies_outgoing_report.v1.exceptions import (SuppliesOutgoingReportNotFoundException,
-                                                                   SuppliesOutgoingReportUpdateException,
-                                                                   SuppliesOutgoingReportSoftDeleteException,
-                                                                   SuppliesOutgoingReportRestoreException
-                                                                   )
-from api_rm_inv.api_status.v1.models import Status
-from api_rm_inv.api_supplies_outgoing_report.v1.main import AppCRUD
+"""
+Data Access Layer (CRUD) for Supplies Outgoing Reports.
+
+Handles queries and staged writes for general warehouse supplies dispatched out of the plant.
+Strictly free of manual commits and HTTP exceptions.
+"""
+
+from typing import List, Optional, Dict, Any
+from uuid import UUID
+from sqlalchemy import or_, desc, func
+
+from core.base import BaseRepository
 from api_rm_inv.api_supplies_outgoing_report.v1.models import SuppliesOutgoingReport
 from api_rm_inv.api_supplies_outgoing_report.v1.schemas import SuppliesOutgoingFormCreate, SuppliesOutgoingFormUpdate
-from uuid import UUID
 from api_rm_inv.api_raw_materials.v1.models import RawMaterial
-from api_rm_inv.api_warehouses.v1.models import Warehouse
-from sqlalchemy import or_, desc
+from shared.warehouses.models import Warehouse
+from shared.statuses.models import Status
+from shared.users.models import User
 
 
-# These are the code for the app to communicate to the database
-class SuppliesOutgoingReportCRUD(AppCRUD):
+class SuppliesOutgoingReportCRUD(BaseRepository):
+    """Repository handling all database interactions for tbl_supplies_outgoing_reports."""
 
-
-    def create_outgoing_report(self, outgoing_report: SuppliesOutgoingFormCreate):
-
-        outgoing_report_item = SuppliesOutgoingReport(rm_code_id=outgoing_report.rm_code_id,
-                                            warehouse_id=outgoing_report.warehouse_id,
-                                            ref_number=outgoing_report.ref_number,
-                                            outgoing_date=outgoing_report.outgoing_date,
-                                            qty_kg=outgoing_report.qty_kg,
-                                            status_id = outgoing_report.status_id
-                                            )
-
-
-        self.db.add(outgoing_report_item)
-        self.db.commit()
-        self.db.refresh(outgoing_report_item)
-        # return self.get_outgoing_report()
-        return outgoing_report_item
-
-    def get_outgoing_report(self):
-        """
-             Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
-            self.db.query(
-                SuppliesOutgoingReport.id,
-                RawMaterial.rm_code.label("raw_material"),
-                SuppliesOutgoingReport.qty_kg,
-                SuppliesOutgoingReport.ref_number,
-                Warehouse.wh_name,
-                Status.name.label("status"),
-                SuppliesOutgoingReport.outgoing_date,
-                SuppliesOutgoingReport.created_at,
-                SuppliesOutgoingReport.updated_at,
-                SuppliesOutgoingReport.date_computed
-
-            )
-
-            .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)  # Join SuppliesOutgoingReport with RawMaterial
-            .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)  # Join SuppliesOutgoingReport with Warehouse
-            .join(Status, SuppliesOutgoingReport.status_id == Status.id)
+    def resolve_supply_material(self, rm_code: str) -> Optional[RawMaterial]:
+        """Resolves a supply catalog item by its code."""
+        cleaned = rm_code.replace(" ", "").upper()
+        return (
+            self.db.query(RawMaterial)
             .filter(
-                # Filter for records where is_cleared or is_deleted is NULL or False
-                or_(
-                    SuppliesOutgoingReport.is_cleared.is_(None),  # NULL check for is_cleared
-                    SuppliesOutgoingReport.is_cleared == False  # False check for is_cleared
-                ),
-                or_(
-                    SuppliesOutgoingReport.is_deleted.is_(None),  # NULL check for is_deleted
-                    SuppliesOutgoingReport.is_deleted == False  # False check for is_deleted
-                )
+                func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned,
+                RawMaterial.type == "SUPPLY"
             )
-
-            .order_by(desc(SuppliesOutgoingReport.created_at))  # Order from newest to oldest
+            .first()
         )
 
-        # Return All the result
-        return stmt.all()
+    def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
+        """Resolves a warehouse by its facility number or name."""
+        target = str(wh_number).strip()
+        wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
+        if wh:
+            return wh
+        return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
 
-    def get_deleted_outgoing_report(self):
-        """
-             Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
+    def resolve_status(self, status_name: str) -> Optional[Status]:
+        """Resolves a status by name."""
+        return self.db.query(Status).filter(func.lower(Status.name) == status_name.strip().lower()).first()
+
+    def get_by_id(self, report_id: UUID) -> Optional[SuppliesOutgoingReport]:
+        """Fetches a single supplies outgoing report by UUID."""
+        return self.db.query(SuppliesOutgoingReport).filter(SuppliesOutgoingReport.id == report_id).first()
+
+    def create(self, record: SuppliesOutgoingReport) -> SuppliesOutgoingReport:
+        """Stages a new supplies outgoing report entry in the active transaction."""
+        self.db.add(record)
+        self.db.flush()
+        return record
+
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated active, un-cleared supplies outgoing reports using dictionary mappings."""
+        rows = (
             self.db.query(
                 SuppliesOutgoingReport.id,
                 RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
                 SuppliesOutgoingReport.qty_kg,
                 SuppliesOutgoingReport.ref_number,
                 Warehouse.wh_name,
+                Warehouse.wh_number,
                 Status.name.label("status"),
                 SuppliesOutgoingReport.outgoing_date,
                 SuppliesOutgoingReport.created_at,
                 SuppliesOutgoingReport.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 SuppliesOutgoingReport.date_computed
-
             )
-
-            .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)  # Join SuppliesOutgoingReport with RawMaterial
-            .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)  # Join SuppliesOutgoingReport with Warehouse
+            .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)
+            .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)
             .join(Status, SuppliesOutgoingReport.status_id == Status.id)
+            .outerjoin(User, SuppliesOutgoingReport.created_by_id == User.id)
             .filter(
-                    SuppliesOutgoingReport.is_cleared == True,  # False check for is_cleared
-                    SuppliesOutgoingReport.is_deleted == True  # False check for is_deleted
+                or_(SuppliesOutgoingReport.is_cleared.is_(None), SuppliesOutgoingReport.is_cleared.is_(False)),
+                or_(SuppliesOutgoingReport.is_deleted.is_(None), SuppliesOutgoingReport.is_deleted.is_(False))
             )
+            .order_by(desc(SuppliesOutgoingReport.created_at))
+            .limit(limit)
+            .offset(offset)
+            .all()
         )
+        return [dict(row._mapping) for row in rows]
 
-        # Return All the result
-        return stmt.all()
-
-    def get_historical_outgoing_report(self, record_id):
-        """
-             Join StockOnHand, OutgoingReport, Warehouse, and RawMaterial tables.
-             """
-        # Join tables
-        stmt = (
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated soft-deleted supplies outgoing reports for audit recovery."""
+        rows = (
             self.db.query(
                 SuppliesOutgoingReport.id,
                 RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
                 SuppliesOutgoingReport.qty_kg,
                 SuppliesOutgoingReport.ref_number,
                 Warehouse.wh_name,
+                Warehouse.wh_number,
                 Status.name.label("status"),
                 SuppliesOutgoingReport.outgoing_date,
                 SuppliesOutgoingReport.created_at,
                 SuppliesOutgoingReport.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
+                SuppliesOutgoingReport.date_computed
+            )
+            .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)
+            .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)
+            .join(Status, SuppliesOutgoingReport.status_id == Status.id)
+            .outerjoin(User, SuppliesOutgoingReport.created_by_id == User.id)
+            .filter(SuppliesOutgoingReport.is_deleted.is_(True))
+            .order_by(desc(SuppliesOutgoingReport.updated_at))
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]
+
+    def list_historical(
+        self,
+        record_id: Optional[UUID] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical supplies reports with pagination."""
+        query = (
+            self.db.query(
+                SuppliesOutgoingReport.id,
+                RawMaterial.rm_code.label("raw_material"),
+                RawMaterial.rm_name,
+                SuppliesOutgoingReport.qty_kg,
+                SuppliesOutgoingReport.ref_number,
+                Warehouse.wh_name,
+                Warehouse.wh_number,
+                Status.name.label("status"),
+                SuppliesOutgoingReport.outgoing_date,
+                SuppliesOutgoingReport.created_at,
+                SuppliesOutgoingReport.updated_at,
+                func.concat(User.first_name, " ", User.last_name).label("created_by"),
                 SuppliesOutgoingReport.date_computed,
                 SuppliesOutgoingReport.is_adjusted
-
             )
-
-            .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)  # Join SuppliesOutgoingReport with RawMaterial
-            .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)  # Join SuppliesOutgoingReport with Warehouse
+            .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)
+            .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)
             .join(Status, SuppliesOutgoingReport.status_id == Status.id)
+            .outerjoin(User, SuppliesOutgoingReport.created_by_id == User.id)
             .filter(
-                    # SuppliesOutgoingReport.is_cleared == True,  # False check for is_cleared
-                        SuppliesOutgoingReport.date_computed.is_not(None),
-                    or_(
-                        SuppliesOutgoingReport.is_deleted.is_(None),  # NULL check for is_deleted
-                        SuppliesOutgoingReport.is_deleted == False  # False check for is_deleted
-                    )
+                SuppliesOutgoingReport.date_computed.is_not(None),
+                or_(SuppliesOutgoingReport.is_deleted.is_(None), SuppliesOutgoingReport.is_deleted.is_(False))
             )
         )
+        if record_id:
+            query = query.filter(SuppliesOutgoingReport.id == record_id)
 
-        if stmt:
-            if record_id:
-                stmt = stmt.filter(SuppliesOutgoingReport.id == record_id)
-
-            return stmt.all()
-        else:
-            return []
-
-    def update_outgoing_report(self, outgoing_report_id: UUID, outgoing_report_update: SuppliesOutgoingFormUpdate):
-        try:
-            outgoing_report = self.db.query(SuppliesOutgoingReport).filter(SuppliesOutgoingReport.id == outgoing_report_id).first()
-            if not outgoing_report or outgoing_report.is_deleted:
-                raise SuppliesOutgoingReportNotFoundException(detail="Outgoing Report not found or already deleted.")
-
-            for key, value in outgoing_report_update.dict(exclude_unset=True).items():
-                setattr(outgoing_report, key, value)
-            self.db.commit()
-            self.db.refresh(outgoing_report)
-            return self.get_outgoing_report()
-
-        except Exception as e:
-            raise SuppliesOutgoingReportUpdateException(detail=f"Error: {str(e)}")
-
-    def soft_delete_outgoing_report(self, outgoing_report_id: UUID):
-        try:
-            outgoing_report = self.db.query(SuppliesOutgoingReport).filter(SuppliesOutgoingReport.id == outgoing_report_id).first()
-            if not outgoing_report or outgoing_report.is_deleted:
-                raise SuppliesOutgoingReportNotFoundException(detail="Outgoing Report not found or already deleted.")
-
-            outgoing_report.is_deleted = True
-            self.db.commit()
-            self.db.refresh(outgoing_report)
-            return self.get_outgoing_report()
-
-        except Exception as e:
-            raise SuppliesOutgoingReportSoftDeleteException(detail=f"Error: {str(e)}")
-
-
-    def restore_outgoing_report(self, outgoing_report_id: UUID):
-        try:
-            outgoing_report = self.db.query(SuppliesOutgoingReport).filter(SuppliesOutgoingReport.id == outgoing_report_id).first()
-            if not outgoing_report or not outgoing_report.is_deleted:
-                raise SuppliesOutgoingReportNotFoundException(detail="Outgoing Report not found or already restored.")
-
-            outgoing_report.is_deleted = False
-            self.db.commit()
-            self.db.refresh(outgoing_report)
-            return outgoing_report
-
-        except Exception as e:
-            raise SuppliesOutgoingReportRestoreException(detail=f"Error: {str(e)}")
+        rows = query.order_by(desc(SuppliesOutgoingReport.date_computed)).limit(limit).offset(offset).all()
+        return [dict(row._mapping) for row in rows]

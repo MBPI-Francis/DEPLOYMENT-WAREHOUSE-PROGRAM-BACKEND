@@ -35,13 +35,13 @@ def get_system_audit_logs(
     Restricted to ADMIN and RM_SUPERVISOR roles.
     """
     query = """
-        SELECT 
-            id, timestamp, module, username, role, department, 
-            ip_address, workstation_name, action, table_name, 
-            record_id, payload_snapshot
-        FROM public.tbl_system_audit_logs
-        WHERE 1 = 1
-    """
+            SELECT 
+                id, timestamp, module, username, role, department, 
+                ip_address, workstation_name, action, table_name, 
+                record_id, payload_snapshot
+            FROM schema_master.tbl_system_audit_logs
+            WHERE 1 = 1
+        """
     params = {"limit": limit, "offset": offset}
 
     if module and module.strip().lower() != "all":

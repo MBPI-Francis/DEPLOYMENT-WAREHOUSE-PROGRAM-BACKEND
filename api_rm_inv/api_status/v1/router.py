@@ -1,48 +1,131 @@
-from fastapi import APIRouter, Depends, HTTPException
+"""
+API Router for Status Management Endpoints.
+
+All endpoints use synchronous 'def' to allow threadpool concurrency
+across LAN workstations and include limit/offset pagination.
+"""
+
+from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
-from api_rm_inv.api_status.v1.schemas import StatusCreate, StatusUpdate, StatusResponse, StatusResponse, \
+
+from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
+from api_rm_inv.api_status.v1.schemas import (
+    StatusCreate,
+    StatusUpdate,
+    StatusResponse,
+    TransformedStatusResponse,
     StatusSearchResponse
+)
 from api_rm_inv.api_status.v1.service import StatusService
-from api_rm_inv.settings.database import get_db
-from uuid import UUID
-from typing import List
 
-router = APIRouter(prefix="/api/status/v1")
-
-@router.post("/create/", response_model=StatusResponse)
-async def create_status(status: StatusCreate, db: get_db = Depends()):
-    result = StatusService(db).create_status(status)
-    return result
-
-@router.get("/list/", response_model=list[StatusResponse])
-async def read_status(db: get_db = Depends()):
-    result = StatusService(db).get_status()
-    return result
+router = APIRouter(prefix="/api/v1/rm/status", tags=["Status Management"])
 
 
-@router.get("/transformed_list/", response_model=list[StatusResponse])
-async def read_transformed_status(db: get_db = Depends()):
-    result = StatusService(db).all_transformed_status()
-    return result
-
-@router.put("/update/{status_id}/", response_model=StatusResponse)
-async def update_status(status_id: UUID, status_update: StatusUpdate, db: get_db = Depends()):
-    result = StatusService(db).update_status(status_id, status_update)
-    return result
-
-@router.put("/restore/{status_id}/", response_model=StatusResponse)
-async def restore_status(status_id: UUID,  db: get_db = Depends()):
-    result = StatusService(db).restore_status(status_id)
-    return result
-
-
-@router.delete("/delete/{status_id}/", response_model=StatusResponse)
-async def delete_status(status_id: UUID, db: get_db = Depends()):
-    result = StatusService(db).soft_delete_status(status_id)
-    return result
+@router.post(
+    "/create/",
+    response_model=StatusResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new quality status"
+)
+def create_status(
+    payload: StatusCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Registers a new quality classification tag."""
+    service = StatusService(db)
+    return service.create_status(payload, request, current_user)
 
 
-@router.get("/search_status/", response_model=StatusSearchResponse)
-async def search_status(name: str = None, db: get_db = Depends()):
-    result = StatusService(db).get_status_by_name(name)
-    return result
+@router.get(
+    "/list/",
+    response_model=List[StatusResponse],
+    summary="List active quality statuses (Paginated)"
+)
+def read_status(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated active quality statuses."""
+    service = StatusService(db)
+    return service.get_status(limit=limit, offset=offset)
+
+
+@router.get(
+    "/transformed_list/",
+    response_model=List[Dict[str, Any]],
+    summary="List statuses with creator details (Paginated)"
+)
+def read_transformed_status(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves active quality statuses joined with creator full names."""
+    service = StatusService(db)
+    return service.all_transformed_status(limit=limit, offset=offset)
+
+
+@router.get(
+    "/search_status/",
+    response_model=StatusSearchResponse,
+    summary="Search status by name"
+)
+def search_status(
+    name: str = Query(..., description="Status name to search"),
+    db: Session = Depends(get_db)
+):
+    """Looks up a status record by exact or normalized name."""
+    service = StatusService(db)
+    return service.get_status_by_name(name)
+
+
+@router.put(
+    "/update/{status_name}/",
+    response_model=StatusResponse,
+    summary="Update quality status by name"
+)
+def update_status(
+    status_name: str,
+    payload: StatusUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = StatusService(db)
+    return service.update_status_by_name(status_name, payload, request, current_user)
+
+
+@router.delete(
+    "/delete/{status_name}/",
+    response_model=StatusResponse,
+    summary="Soft-delete a quality status by name"
+)
+def delete_status(
+    status_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = StatusService(db)
+    return service.soft_delete_status_by_name(status_name, request, current_user)
+
+
+@router.put(
+    "/restore/{status_name}/",
+    response_model=StatusResponse,
+    summary="Restore a soft-deleted quality status by name"
+)
+def restore_status(
+    status_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    service = StatusService(db)
+    return service.restore_status_by_name(status_name, request, current_user)

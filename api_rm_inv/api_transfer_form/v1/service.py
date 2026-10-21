@@ -3,15 +3,16 @@ Business Service Layer for Transfer Forms.
 
 Coordinates:
 - Warehouse routing validation (preventing same-warehouse transfers).
-- Stock overdraft validation against schema_whrm.view_adjusted_ending_balance
-  to ensure the origin warehouse physically has sufficient stock.
+- Stock overdraft validation against schema_whrm.view_adjusted_ending_balance.
 - SOH baseline provisioning for the destination warehouse.
+- Atomic audit logging and commit/rollback boundaries.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
+from sqlalchemy.orm import Session
 
 from core.base import BaseService
 from api_rm_inv.api_transfer_form.v1.crud import TempTransferFormCRUD
@@ -21,12 +22,14 @@ from api_rm_inv.api_transfer_form.v1.schemas import (
     TempTransferFormUpdate,
     TempTransferFormResponse
 )
+from core.logger import AuditLogger
+from shared.users.models import User
 
 
 class TempTransferFormService(BaseService):
     """Coordinates business rules and operations for internal stock transfers."""
 
-    def __init__(self, db):
+    def __init__(self, db: Session):
         super().__init__(db)
         self.crud = TempTransferFormCRUD(db)
 
@@ -40,13 +43,11 @@ class TempTransferFormService(BaseService):
         existing_transfer_qty: Decimal = Decimal("0.00")
     ) -> tuple[UUID, UUID, UUID, Optional[UUID]]:
         """
-        Validates business rules and resolves codes into database UUIDs:
+        Validates business rules and resolves business keys into UUIDs:
         1. Ensures origin and destination warehouses are different.
         2. Resolves material, origin warehouse, destination warehouse, and status.
-        3. Validates that the origin warehouse has sufficient live stock in
-           schema_whrm.view_adjusted_ending_balance to fulfill the transfer.
+        3. Validates that the origin warehouse physically has sufficient stock.
         """
-        # Rule 1: Cannot transfer to the exact same warehouse
         if from_wh_number.strip().lower() == to_wh_number.strip().lower():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -74,7 +75,6 @@ class TempTransferFormService(BaseService):
                 detail=f"Destination warehouse '{to_wh_number}' does not exist."
             )
 
-        st_id = None
         effective_status_name = status_name or "good"
         st = self.crud.resolve_status(effective_status_name)
         if not st:
@@ -84,10 +84,8 @@ class TempTransferFormService(BaseService):
             )
         st_id = st.id
 
-        # Rule 2: Origin Warehouse Stock Availability Check
+        # Origin Warehouse Stock Availability Check
         live_stock = self.crud.get_available_stock(material.id, from_wh.id, st_id)
-
-        # On updates, add back the previously transferred quantity to avoid false-positive overdrafts
         effective_stock = live_stock + existing_transfer_qty
 
         if requested_qty > effective_stock:
@@ -102,12 +100,13 @@ class TempTransferFormService(BaseService):
 
         return material.id, from_wh.id, to_wh.id, st_id
 
-    def create_transfer_form(self, payload: TempTransferFormCreate) -> TempTransferFormResponse:
-        """
-        Validates origin stock availability and records an internal transfer.
-        Provisions a base SOH in the destination warehouse if this is the first time
-        this material is stored there.
-        """
+    def create_transfer_form(
+        self,
+        payload: TempTransferFormCreate,
+        request: Request,
+        current_user: User
+    ) -> TempTransferFormResponse:
+        """Validates stock, stages destination SOH, and commits transfer and audit log atomically."""
         rm_id, from_wh_id, to_wh_id, st_id = self._resolve_and_validate(
             rm_code=payload.rm_code,
             from_wh_number=payload.from_wh_number,
@@ -117,45 +116,54 @@ class TempTransferFormService(BaseService):
             existing_transfer_qty=Decimal("0.00")
         )
 
-        # Ensure destination warehouse has an active SOH baseline
-        self.crud.ensure_stock_on_hand_initialized(rm_id, to_wh_id, st_id)
+        try:
+            # 1. Ensure destination warehouse SOH baseline exists
+            self.crud.ensure_stock_on_hand_initialized(rm_id, to_wh_id, st_id)
 
-        record = TempTransferForm(
-            rm_code_id=rm_id,
-            from_warehouse_id=from_wh_id,
-            to_warehouse_id=to_wh_id,
-            status_id=st_id,
-            ref_number=payload.ref_number.strip(),
-            transfer_date=payload.transfer_date,
-            qty_kg=payload.qty_kg,
-            created_by_id=payload.created_by_id,
-            is_deleted=False,
-            is_cleared=False,
-            is_adjusted=False
-        )
-        created = self.crud.create(record)
+            # 2. Stage transfer form record
+            record = TempTransferForm(
+                rm_code_id=rm_id,
+                from_warehouse_id=from_wh_id,
+                to_warehouse_id=to_wh_id,
+                status_id=st_id,
+                ref_number=payload.ref_number.strip(),
+                transfer_date=payload.transfer_date,
+                qty_kg=payload.qty_kg,
+                created_by_id=current_user.id,
+                is_deleted=False,
+                is_cleared=False,
+                is_adjusted=False
+            )
+            created = self.crud.create(record)
 
-        # Return full formatted DTO safely
-        active_list = self.crud.list_active()
-        matched = next(
-            (
-                item for item in active_list
-                if (item["id"] if isinstance(item, dict) else getattr(item, "id", None)) == created.id
-            ),
-            None
-        )
-        if matched:
-            return matched
+            # 3. Stage Audit Log
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="INSERT",
+                table_name="tbl_transfer_forms",
+                record_id=created.id,
+                payload=payload
+            )
 
-        return created
+            # 4. Atomic Commit
+            self.db.commit()
+            self.db.refresh(created)
+            return created
 
-    def get_transfer_form(self) -> List[dict]:
-        """Retrieves active transfer records for desktop grid display."""
-        return self.crud.list_active()
+        except Exception as e:
+            self.db.rollback()
+            raise e
 
-    def get_deleted_transfer_form(self) -> List[dict]:
-        """Retrieves soft-deleted transfer records for recovery."""
-        return self.crud.list_deleted()
+    def get_transfer_form(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated active transfer records for desktop display."""
+        return self.crud.list_active(limit=limit, offset=offset)
+
+    def get_deleted_transfer_form(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated soft-deleted transfer records for recovery."""
+        return self.crud.list_deleted(limit=limit, offset=offset)
 
     def get_historical_transfer_form(
         self,
@@ -168,8 +176,8 @@ class TempTransferFormService(BaseService):
         status_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
-        """Retrieves historical computed transfer records matching filter parameters with pagination."""
+    ) -> List[Dict[str, Any]]:
+        """Retrieves historical computed transfer records matching filters with pagination."""
         return self.crud.list_historical(
             record_id=record_id,
             date_from=date_from,
@@ -182,8 +190,14 @@ class TempTransferFormService(BaseService):
             offset=offset
         )
 
-    def update_transfer_form(self, transfer_id: UUID, payload: TempTransferFormUpdate) -> List[dict]:
-        """Modifies an existing transfer form with origin stock re-validation."""
+    def update_transfer_form(
+        self,
+        transfer_id: UUID,
+        payload: TempTransferFormUpdate,
+        request: Request,
+        current_user: User
+    ) -> TempTransferFormResponse:
+        """Modifies an existing transfer form with origin stock re-validation and audit logging."""
         record = self.crud.get_by_id(transfer_id)
         if not record or record.is_deleted:
             raise HTTPException(
@@ -197,7 +211,6 @@ class TempTransferFormService(BaseService):
         target_status = payload.status_name or (record.status.name if record.status else "good")
         target_qty = payload.qty_kg if payload.qty_kg is not None else record.qty_kg
 
-        # Validate stock availability in origin warehouse (giving credit for the existing record's weight)
         rm_id, from_wh_id, to_wh_id, st_id = self._resolve_and_validate(
             rm_code=target_rm,
             from_wh_number=target_from_wh,
@@ -207,27 +220,47 @@ class TempTransferFormService(BaseService):
             existing_transfer_qty=record.qty_kg
         )
 
-        record.rm_code_id = rm_id
-        record.from_warehouse_id = from_wh_id
-        record.to_warehouse_id = to_wh_id
-        record.status_id = st_id
-        record.qty_kg = target_qty
+        try:
+            record.rm_code_id = rm_id
+            record.from_warehouse_id = from_wh_id
+            record.to_warehouse_id = to_wh_id
+            record.status_id = st_id
+            record.qty_kg = target_qty
+            record.updated_by_id = current_user.id
 
-        # Re-check destination SOH provisioning with updated parameters
-        self.crud.ensure_stock_on_hand_initialized(rm_id, to_wh_id, st_id)
+            self.crud.ensure_stock_on_hand_initialized(rm_id, to_wh_id, st_id)
 
-        if payload.ref_number is not None:
-            record.ref_number = payload.ref_number.strip()
-        if payload.transfer_date is not None:
-            record.transfer_date = payload.transfer_date
-        if payload.updated_by_id is not None:
-            record.updated_by_id = payload.updated_by_id
+            if payload.ref_number is not None:
+                record.ref_number = payload.ref_number.strip()
+            if payload.transfer_date is not None:
+                record.transfer_date = payload.transfer_date
 
-        self.db.commit()
-        return self.crud.list_active()
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="UPDATE",
+                table_name="tbl_transfer_forms",
+                record_id=record.id,
+                payload=payload
+            )
 
-    def soft_delete_transfer_form(self, transfer_id: UUID) -> List[dict]:
-        """Soft-deletes a transfer record and returns the refreshed active list."""
+            self.db.commit()
+            self.db.refresh(record)
+            return record
+
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def soft_delete_transfer_form(
+        self,
+        transfer_id: UUID,
+        request: Request,
+        current_user: User
+    ) -> Dict[str, Any]:
+        """Soft-deletes a transfer record and logs the event atomically."""
         record = self.crud.get_by_id(transfer_id)
         if not record or record.is_deleted:
             raise HTTPException(
@@ -235,11 +268,34 @@ class TempTransferFormService(BaseService):
                 detail="Transfer Form not found or already deleted."
             )
 
-        record.is_deleted = True
-        self.db.commit()
-        return self.crud.list_active()
+        try:
+            record.is_deleted = True
+            record.deleted_by_id = current_user.id
 
-    def restore_transfer_form(self, transfer_id: UUID) -> List[dict]:
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="SOFT_DELETE",
+                table_name="tbl_transfer_forms",
+                record_id=record.id,
+                payload={"ref_number": record.ref_number, "action": "soft_delete"}
+            )
+
+            self.db.commit()
+            return {"message": "Transfer form soft-deleted successfully.", "id": str(transfer_id)}
+
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def restore_transfer_form(
+        self,
+        transfer_id: UUID,
+        request: Request,
+        current_user: User
+    ) -> Dict[str, Any]:
         """Restores a soft-deleted transfer record after re-validating origin stock."""
         record = self.crud.get_by_id(transfer_id)
         if not record or not record.is_deleted:
@@ -248,7 +304,7 @@ class TempTransferFormService(BaseService):
                 detail="Transfer Form is not in a deleted state."
             )
 
-        # Before restoring, verify the origin warehouse still has enough stock to transfer
+        # Ensure origin warehouse currently has stock before allowing restore
         self._resolve_and_validate(
             rm_code=record.rm_code.rm_code,
             from_wh_number=record.from_warehouse.wh_number,
@@ -258,6 +314,23 @@ class TempTransferFormService(BaseService):
             existing_transfer_qty=Decimal("0.00")
         )
 
-        record.is_deleted = False
-        self.db.commit()
-        return self.crud.list_active()
+        try:
+            record.is_deleted = False
+
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="RESTORE",
+                table_name="tbl_transfer_forms",
+                record_id=record.id,
+                payload={"ref_number": record.ref_number, "action": "restore"}
+            )
+
+            self.db.commit()
+            return {"message": "Transfer form restored successfully.", "id": str(transfer_id)}
+
+        except Exception as e:
+            self.db.rollback()
+            raise e

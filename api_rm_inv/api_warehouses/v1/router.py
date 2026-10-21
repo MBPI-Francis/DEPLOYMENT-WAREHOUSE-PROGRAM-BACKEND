@@ -2,11 +2,11 @@
 API Router for Warehouse Management Endpoints.
 
 All endpoints use synchronous 'def' to allow threadpool concurrency
-across LAN workstations.
+across LAN workstations and include limit/offset pagination.
 """
 
-from typing import List
-from fastapi import APIRouter, Depends, status, Request
+from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -44,23 +44,31 @@ def create_warehouse(
 @router.get(
     "/list/",
     response_model=List[WarehouseResponse],
-    summary="List all active warehouses"
+    summary="List all active warehouses (Paginated)"
 )
-def read_warehouse(db: Session = Depends(get_db)):
+def read_warehouse(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves all active warehouses sorted by facility number."""
     service = WarehouseService(db)
-    return service.get_warehouse()
+    return service.get_warehouse(limit=limit, offset=offset)
 
 
 @router.get(
     "/transformed_list/",
-    response_model=List[TransformedWarehouseResponse],
-    summary="List warehouses with creator details"
+    response_model=List[Dict[str, Any]],
+    summary="List warehouses with creator details (Paginated)"
 )
-def read_transformed_warehouse_list(db: Session = Depends(get_db)):
+def read_transformed_warehouse_list(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves active warehouses joined with creator user full names."""
     service = WarehouseService(db)
-    return service.all_transformed_warehouse_list()
+    return service.all_transformed_warehouse_list(limit=limit, offset=offset)
 
 
 @router.put(
@@ -69,7 +77,7 @@ def read_transformed_warehouse_list(db: Session = Depends(get_db)):
     summary="Update warehouse by number"
 )
 def update_warehouse(
-    wh_number: int,  # <-- Typed as int to match smallint in PostgreSQL
+    wh_number: int,
     payload: WarehouseUpdate,
     request: Request,
     db: Session = Depends(get_db),
@@ -85,7 +93,7 @@ def update_warehouse(
     summary="Soft-delete a warehouse by number"
 )
 def delete_warehouse(
-    wh_number: int,  # <-- Typed as int
+    wh_number: int,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -100,7 +108,7 @@ def delete_warehouse(
     summary="Restore a soft-deleted warehouse by number"
 )
 def restore_warehouse(
-    wh_number: int,  # <-- Typed as int
+    wh_number: int,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

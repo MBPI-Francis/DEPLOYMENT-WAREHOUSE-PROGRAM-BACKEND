@@ -4,9 +4,10 @@ Data Access Layer (CRUD) for Preparation Form Module.
 Contains direct SQLAlchemy database queries and writes across:
 - schema_whprep: Upstream recipe runs and details.
 - schema_whrm: Inventory deduction preparation entries and lookups.
+Strictly free of manual commits and HTTP exceptions.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_, String
@@ -77,7 +78,7 @@ class PrepIntegrationCRUD(BaseRepository):
         )
 
     def check_lot_already_deducted(self, prod_lot_no: str) -> bool:
-        """Verifies if deductions for this lot already exist in the inventory preparation."""
+        """Verifies if deductions for this lot already exist in inventory preparation."""
         exists = (
             self.db.query(TempPreparationForm.id)
             .filter(
@@ -126,16 +127,14 @@ class PrepIntegrationCRUD(BaseRepository):
         return self.db.query(TempPreparationForm).filter(TempPreparationForm.id == form_id).first()
 
     def create_inventory_deduction(self, record: TempPreparationForm) -> TempPreparationForm:
-        """Persists a new deduction record to schema_whrm."""
+        """Stages a new deduction record to schema_whrm without committing."""
         self.db.add(record)
+        self.db.flush()
         return record
 
-    def list_active_preparation_records(self) -> List[dict]:
-        """
-        Retrieves active, un-cleared preparation deduction records joined
-        with material, warehouse, and user lookup details.
-        """
-        results = (
+    def list_active_preparation_records(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated active, un-cleared preparation deduction records with dictionary mapping."""
+        rows = (
             self.db.query(
                 TempPreparationForm.id,
                 TempPreparationForm.ref_number,
@@ -167,13 +166,15 @@ class PrepIntegrationCRUD(BaseRepository):
                 or_(TempPreparationForm.is_deleted.is_(None), TempPreparationForm.is_deleted.is_(False))
             )
             .order_by(desc(TempPreparationForm.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
-        return results
+        return [dict(row._mapping) for row in rows]
 
-    def list_deleted_preparation_records(self) -> List[dict]:
-        """Retrieves all soft-deleted preparation deduction records for recovery/auditing."""
-        results = (
+    def list_deleted_preparation_records(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated soft-deleted preparation deduction records for auditing."""
+        rows = (
             self.db.query(
                 TempPreparationForm.id,
                 TempPreparationForm.ref_number,
@@ -202,12 +203,19 @@ class PrepIntegrationCRUD(BaseRepository):
             .outerjoin(User, TempPreparationForm.created_by_id == User.id)
             .filter(TempPreparationForm.is_deleted.is_(True))
             .order_by(desc(TempPreparationForm.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
-        return results
+        return [dict(row._mapping) for row in rows]
 
-    def list_historical_preparation_records(self, record_id: Optional[str] = None) -> List[dict]:
-        """Retrieves computed historical preparation records for audit trail analysis."""
+    def list_historical_preparation_records(
+        self,
+        record_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical preparation records with dictionary mapping."""
         query = (
             self.db.query(
                 TempPreparationForm.id,
@@ -243,4 +251,5 @@ class PrepIntegrationCRUD(BaseRepository):
         if record_id:
             query = query.filter(func.cast(TempPreparationForm.id, String) == record_id.strip())
 
-        return query.order_by(desc(TempPreparationForm.date_computed)).all()
+        rows = query.order_by(desc(TempPreparationForm.date_computed)).limit(limit).offset(offset).all()
+        return [dict(row._mapping) for row in rows]

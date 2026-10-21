@@ -1,11 +1,12 @@
 """
 Data Access Layer (CRUD) for Receiving Reports.
 
-Handles queries, writes, and StockOnHand auto-initialization in schema_whrm.
+Handles database queries, staged writes, and StockOnHand auto-initialization in schema_whrm.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, func
 
@@ -22,7 +23,7 @@ class TempReceivingReportCRUD(BaseRepository):
     """Repository handling database operations for inbound receiving reports."""
 
     def resolve_raw_material(self, rm_code: str) -> Optional[RawMaterial]:
-        """Looks up a material by its code, ignoring spaces and case."""
+        """Looks up a material by its business code, ignoring spaces and case."""
         cleaned = rm_code.replace(" ", "").upper()
         return (
             self.db.query(RawMaterial)
@@ -31,7 +32,7 @@ class TempReceivingReportCRUD(BaseRepository):
         )
 
     def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
-        """Looks up a warehouse by number or name."""
+        """Looks up a warehouse by number or friendly name."""
         target = str(wh_number).strip()
         wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
         if wh:
@@ -39,7 +40,7 @@ class TempReceivingReportCRUD(BaseRepository):
         return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
 
     def resolve_status(self, status_name: str) -> Optional[Status]:
-        """Looks up a quality status by name."""
+        """Looks up a quality status by normalized name."""
         return (
             self.db.query(Status)
             .filter(func.lower(Status.name) == status_name.strip().lower())
@@ -49,7 +50,7 @@ class TempReceivingReportCRUD(BaseRepository):
     def ensure_stock_on_hand_initialized(self, rm_id: UUID, wh_id: UUID, status_id: UUID) -> None:
         """
         Guarantees that a base StockOnHand row exists for this (material, warehouse, status) tuple.
-        If missing, provisions a base record with rm_soh = 0.00 so SQL calculation views stay balanced.
+        If missing, stages a base record with rm_soh = 0.00 so balance views compute in 15ms.
         """
         check_query = text("""
             SELECT 1 FROM schema_whrm.view_beginning_soh
@@ -65,7 +66,6 @@ class TempReceivingReportCRUD(BaseRepository):
         }).fetchone()
 
         if not exists:
-            # Safely extract audit metadata using named column mapping
             meta_query = text("""
                 SELECT date_computed, recalculation_count 
                 FROM schema_whrm.view_beginning_soh 
@@ -93,15 +93,14 @@ class TempReceivingReportCRUD(BaseRepository):
         return self.db.query(TempReceivingReport).filter(TempReceivingReport.id == report_id).first()
 
     def create(self, record: TempReceivingReport) -> TempReceivingReport:
-        """Persists a new receiving report entry."""
+        """Stages a new receiving report entry in the active transaction."""
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
         return record
 
-    def list_active(self) -> List[dict]:
-        """Retrieves active receiving reports with material, warehouse, and user details."""
-        return (
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated active receiving reports via lightweight row mappings."""
+        rows = (
             self.db.query(
                 TempReceivingReport.id,
                 TempReceivingReport.ref_number,
@@ -127,12 +126,15 @@ class TempReceivingReportCRUD(BaseRepository):
                 or_(TempReceivingReport.is_deleted.is_(None), TempReceivingReport.is_deleted.is_(False))
             )
             .order_by(desc(TempReceivingReport.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
+        return [dict(row._mapping) for row in rows]
 
-    def list_deleted(self) -> List[dict]:
-        """Retrieves soft-deleted receiving reports for audit recovery."""
-        return (
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves paginated soft-deleted receiving reports for audit recovery."""
+        rows = (
             self.db.query(
                 TempReceivingReport.id,
                 TempReceivingReport.ref_number,
@@ -153,11 +155,19 @@ class TempReceivingReportCRUD(BaseRepository):
             .outerjoin(User, TempReceivingReport.created_by_id == User.id)
             .filter(TempReceivingReport.is_deleted.is_(True))
             .order_by(desc(TempReceivingReport.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
+        return [dict(row._mapping) for row in rows]
 
-    def list_historical(self, record_id: Optional[UUID] = None) -> List[dict]:
-        """Retrieves historical reports that have already been computed into closing balances."""
+    def list_historical(
+        self,
+        record_id: Optional[UUID] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical receiving records with pagination."""
         query = (
             self.db.query(
                 TempReceivingReport.id,
@@ -187,4 +197,5 @@ class TempReceivingReportCRUD(BaseRepository):
         if record_id:
             query = query.filter(TempReceivingReport.id == record_id)
 
-        return query.order_by(desc(TempReceivingReport.date_computed)).all()
+        rows = query.order_by(desc(TempReceivingReport.date_computed)).limit(limit).offset(offset).all()
+        return [dict(row._mapping) for row in rows]

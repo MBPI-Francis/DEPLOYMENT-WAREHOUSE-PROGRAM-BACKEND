@@ -3,10 +3,11 @@ Data Access Layer (CRUD) for Transfer Forms.
 
 Handles database queries, destination warehouse SOH auto-provisioning,
 and soft-delete operations in schema_whrm.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, and_, func
 from sqlalchemy.orm import aliased
@@ -98,14 +99,13 @@ class TempTransferFormCRUD(BaseRepository):
         return self.db.query(TempTransferForm).filter(TempTransferForm.id == form_id).first()
 
     def create(self, record: TempTransferForm) -> TempTransferForm:
-        """Persists a new transfer form record."""
+        """Stages a new transfer form record in the active transaction."""
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
         return record
 
-    def list_active(self) -> List[dict]:
-        """Retrieves active, non-cleared transfers with material and warehouse aliases."""
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves active, non-cleared transfers with pagination and row mappings."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
 
@@ -135,12 +135,13 @@ class TempTransferFormCRUD(BaseRepository):
                 or_(TempTransferForm.is_deleted.is_(None), TempTransferForm.is_deleted.is_(False))
             )
             .order_by(desc(TempTransferForm.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
-        # Convert rows to dictionaries for fast Pydantic serialization
         return [dict(row._mapping) for row in records]
 
-    def list_deleted(self) -> List[dict]:
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """Retrieves soft-deleted transfer forms for audit recovery."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
@@ -166,27 +167,25 @@ class TempTransferFormCRUD(BaseRepository):
             .outerjoin(User, TempTransferForm.created_by_id == User.id)
             .filter(TempTransferForm.is_deleted.is_(True))
             .order_by(desc(TempTransferForm.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
-        # Convert rows to dictionaries for fast Pydantic serialization
         return [dict(row._mapping) for row in records]
 
     def list_historical(
-            self,
-            record_id: Optional[UUID] = None,
-            date_from: Optional[str] = None,
-            date_to: Optional[str] = None,
-            rm_code: Optional[str] = None,
-            from_warehouse_name: Optional[str] = None,
-            to_warehouse_name: Optional[str] = None,
-            status_name: Optional[str] = None,
-            limit: int = 50,
-            offset: int = 0
-    ) -> List[dict]:
-        """
-        Retrieves computed historical transfers with multi-field filtering and pagination.
-        Converts rows via row._mapping for fast serialization.
-        """
+        self,
+        record_id: Optional[UUID] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        rm_code: Optional[str] = None,
+        from_warehouse_name: Optional[str] = None,
+        to_warehouse_name: Optional[str] = None,
+        status_name: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical transfers with multi-field filtering and pagination."""
         FromWarehouse = aliased(Warehouse, name="from_warehouse")
         ToWarehouse = aliased(Warehouse, name="to_warehouse")
 
@@ -221,8 +220,7 @@ class TempTransferFormCRUD(BaseRepository):
             query = query.filter(TempTransferForm.id == record_id)
 
         if date_from and date_to:
-            query = query.filter(
-                and_(TempTransferForm.transfer_date >= date_from, TempTransferForm.transfer_date <= date_to))
+            query = query.filter(and_(TempTransferForm.transfer_date >= date_from, TempTransferForm.transfer_date <= date_to))
         elif date_from:
             query = query.filter(TempTransferForm.transfer_date >= date_from)
         elif date_to:
@@ -240,7 +238,6 @@ class TempTransferFormCRUD(BaseRepository):
         if status_name and status_name.strip().lower() != "all":
             query = query.filter(func.lower(Status.name) == status_name.strip().lower())
 
-        # Order by newest computed date and apply limit/offset
         records = (
             query
             .order_by(desc(TempTransferForm.date_computed), desc(TempTransferForm.created_at))
@@ -248,18 +245,13 @@ class TempTransferFormCRUD(BaseRepository):
             .offset(offset)
             .all()
         )
-
-        # Convert to dictionary mappings to make serialization 10x faster for Pydantic
         return [dict(row._mapping) for row in records]
 
     def get_available_stock(self, rm_id: UUID, wh_id: UUID, status_id: Optional[UUID]) -> Decimal:
         """
         Queries schema_whrm.view_adjusted_ending_balance for the live inventory balance
         at the origin warehouse before allowing a stock transfer out.
-
-        Returns Decimal('0.00') if no stock record exists.
         """
-        # If no status provided, default to 'good'
         if not status_id:
             default_st = self.resolve_status("good")
             status_id = default_st.id if default_st else None

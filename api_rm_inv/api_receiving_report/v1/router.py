@@ -5,12 +5,14 @@ All endpoints use synchronous 'def' so database I/O runs inside FastAPI's
 worker thread pool, preventing multi-workstation queries from blocking the event loop.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
 from api_rm_inv.api_receiving_report.v1.schemas import (
     TempReceivingReportCreate,
     TempReceivingReportUpdate,
@@ -29,90 +31,106 @@ router = APIRouter(prefix="/api/v1/rm/receiving-reports", tags=["Receiving Repor
 )
 def create_receiving_report(
     payload: TempReceivingReportCreate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Records an incoming shipment of raw materials.
     Accepts human business keys: rm_code, wh_number, and status_name.
     """
     service = TempReceivingReportService(db)
-    return service.create_receiving_report(payload)
+    return service.create_receiving_report(payload, request, current_user)
 
 
 @router.get(
     "/list/",
-    response_model=List[TempReceivingReportResponse],
-    summary="List active receiving reports"
+    response_model=List[Dict[str, Any]],
+    summary="List active receiving reports (Paginated)"
 )
-def get_receiving_report(db: Session = Depends(get_db)):
-    """Retrieves all active, non-cleared receiving reports for the desktop UI table."""
+def get_receiving_report(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated active, non-cleared receiving reports for the desktop UI table."""
     service = TempReceivingReportService(db)
-    return service.get_receiving_report()
+    return service.get_receiving_report(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/deleted/",
-    response_model=List[TempReceivingReportResponse],
-    summary="List soft-deleted receiving reports"
+    response_model=List[Dict[str, Any]],
+    summary="List soft-deleted receiving reports (Paginated)"
 )
-def get_deleted_receiving_report(db: Session = Depends(get_db)):
-    """Retrieves all soft-deleted receiving reports for audit and recovery."""
+def get_deleted_receiving_report(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Retrieves paginated soft-deleted receiving reports for audit and recovery."""
     service = TempReceivingReportService(db)
-    return service.get_deleted_receiving_report()
+    return service.get_deleted_receiving_report(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/historical/",
-    response_model=List[TempReceivingReportResponse],
-    summary="List historical computed receiving reports"
+    response_model=List[Dict[str, Any]],
+    summary="List historical computed receiving reports (Paginated)"
 )
 def get_historical_receiving_report(
     record_id: Optional[UUID] = Query(None, description="Optional UUID to filter a specific historical report"),
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
     db: Session = Depends(get_db)
 ):
     """Retrieves reports that have already been computed into historical closing balances."""
     service = TempReceivingReportService(db)
-    return service.get_historical_receiving_report(record_id)
+    return service.get_historical_receiving_report(record_id=record_id, limit=limit, offset=offset)
 
 
 @router.put(
     "/update/{receiving_report_id}/",
-    response_model=List[TempReceivingReportResponse],
+    response_model=TempReceivingReportResponse,
     summary="Update an existing receiving report"
 )
 def update_receiving_report(
     receiving_report_id: UUID,
     payload: TempReceivingReportUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Modifies an existing receiving report and returns the refreshed active list."""
+    """Modifies an existing receiving report and records an audit log atomically."""
     service = TempReceivingReportService(db)
-    return service.update_receiving_report(receiving_report_id, payload)
+    return service.update_receiving_report(receiving_report_id, payload, request, current_user)
 
 
 @router.delete(
     "/delete/{receiving_report_id}/",
-    response_model=List[TempReceivingReportResponse],
     summary="Soft-delete a receiving report"
 )
 def delete_receiving_report(
     receiving_report_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Marks a report as deleted without breaking historical ledger balances."""
     service = TempReceivingReportService(db)
-    return service.soft_delete_receiving_report(receiving_report_id)
+    return service.soft_delete_receiving_report(receiving_report_id, request, current_user)
 
 
 @router.put(
     "/restore/{receiving_report_id}/",
-    response_model=List[TempReceivingReportResponse],
     summary="Restore a soft-deleted receiving report"
 )
 def restore_receiving_report(
     receiving_report_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Reactivates a previously soft-deleted receiving report."""
     service = TempReceivingReportService(db)
-    return service.restore_receiving_report(receiving_report_id)
+    return service.restore_receiving_report(receiving_report_id, request, current_user)

@@ -3,14 +3,15 @@ Business Service Layer for Quality Status Change (Held Form) Module.
 
 Enforces inventory business rules:
 - Prohibits changing to the identical status (current == new).
-- Enforces strict stock balance validation against schema_whrm.view_adjusted_ending_balance,
-  rejecting attempts to reclassify more stock than is physically available.
+- Enforces strict stock balance validation against schema_whrm.view_adjusted_ending_balance.
+- Executes atomic audit logging and commits.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
+from sqlalchemy.orm import Session
 
 from core.base import BaseService
 from api_rm_inv.api_change_status_form.v1.crud import TempHeldFormCRUD
@@ -20,12 +21,14 @@ from api_rm_inv.api_change_status_form.v1.schemas import (
     TempHeldFormUpdate,
     TempHeldFormResponse
 )
+from core.logger import AuditLogger
+from shared.users.models import User
 
 
 class TempHeldFormService(BaseService):
     """Business service coordinating QC status changes and stock availability checks."""
 
-    def __init__(self, db):
+    def __init__(self, db: Session):
         super().__init__(db)
         self.crud = TempHeldFormCRUD(db)
 
@@ -44,7 +47,6 @@ class TempHeldFormService(BaseService):
         2. Resolves material, warehouse, and status records.
         3. Validates requested_qty <= available_stock from view_adjusted_ending_balance.
         """
-        # Rule 1: Cannot change to the identical status
         if current_status_name.strip().lower() == new_status_name.strip().lower():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -79,10 +81,7 @@ class TempHeldFormService(BaseService):
                 detail=f"New target quality status '{new_status_name}' does not exist."
             )
 
-        # Rule 2: Stock Availability Check against view_adjusted_ending_balance
         live_stock = self.crud.get_available_stock(material.id, warehouse.id, current_st.id)
-
-        # On updates, add back the previously held quantity to avoid false-positive overdrafts
         effective_stock = live_stock + existing_held_qty
 
         if requested_qty > effective_stock:
@@ -97,10 +96,13 @@ class TempHeldFormService(BaseService):
 
         return material.id, warehouse.id, current_st.id, new_st.id
 
-    def create_held_form(self, payload: TempHeldFormCreate) -> TempHeldFormResponse:
-        """
-        Validates available stock and records a new quality status reclassification.
-        """
+    def create_held_form(
+        self,
+        payload: TempHeldFormCreate,
+        request: Request,
+        current_user: User
+    ) -> TempHeldFormResponse:
+        """Validates stock, stages status change, and commits both record and audit log atomically."""
         rm_id, wh_id, cur_st_id, new_st_id = self._resolve_and_validate(
             rm_code=payload.rm_code,
             wh_number=payload.wh_number,
@@ -109,36 +111,48 @@ class TempHeldFormService(BaseService):
             requested_qty=payload.qty_kg
         )
 
-        record = TempHeldForm(
-            rm_code_id=rm_id,
-            warehouse_id=wh_id,
-            current_status_id=cur_st_id,
-            new_status_id=new_st_id,
-            ref_number=payload.ref_number.strip(),
-            change_status_date=payload.change_status_date,
-            qty_kg=payload.qty_kg,
-            created_by_id=payload.created_by_id,
-            is_deleted=False,
-            is_cleared=False,
-            is_adjusted=False
-        )
-        created = self.crud.create(record)
+        try:
+            record = TempHeldForm(
+                rm_code_id=rm_id,
+                warehouse_id=wh_id,
+                current_status_id=cur_st_id,
+                new_status_id=new_st_id,
+                ref_number=payload.ref_number.strip(),
+                change_status_date=payload.change_status_date,
+                qty_kg=payload.qty_kg,
+                created_by_id=current_user.id,
+                is_deleted=False,
+                is_cleared=False,
+                is_adjusted=False
+            )
+            created = self.crud.create(record)
 
-        # Return full formatted DTO
-        active_list = self.crud.list_active()
-        matched = next((item for item in active_list if item["id"] == created.id), None)
-        if matched:
-            return matched
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="INSERT",
+                table_name="tbl_change_status_forms",
+                record_id=created.id,
+                payload=payload
+            )
 
-        return created
+            self.db.commit()
+            self.db.refresh(created)
+            return created
 
-    def get_held_form(self) -> List[dict]:
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def get_held_form(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """Retrieves active status change records for desktop UI display."""
-        return self.crud.list_active()
+        return self.crud.list_active(limit=limit, offset=offset)
 
-    def get_deleted_held_form(self) -> List[dict]:
+    def get_deleted_held_form(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """Retrieves soft-deleted records for audit recovery."""
-        return self.crud.list_deleted()
+        return self.crud.list_deleted(limit=limit, offset=offset)
 
     def get_historical_held_form(
         self,
@@ -151,7 +165,7 @@ class TempHeldFormService(BaseService):
         new_status_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
+    ) -> List[Dict[str, Any]]:
         """Retrieves computed historical status change records with pagination."""
         return self.crud.list_historical(
             record_id=record_id,
@@ -165,8 +179,14 @@ class TempHeldFormService(BaseService):
             offset=offset
         )
 
-    def update_held_form(self, form_id: UUID, payload: TempHeldFormUpdate) -> List[dict]:
-        """Modifies an existing status change record with stock validation."""
+    def update_held_form(
+        self,
+        form_id: UUID,
+        payload: TempHeldFormUpdate,
+        request: Request,
+        current_user: User
+    ) -> TempHeldFormResponse:
+        """Modifies an existing status change record with stock validation and audit logging."""
         record = self.crud.get_by_id(form_id)
         if not record or record.is_deleted:
             raise HTTPException(
@@ -186,27 +206,48 @@ class TempHeldFormService(BaseService):
             current_status_name=target_cur_st,
             new_status_name=target_new_st,
             requested_qty=target_qty,
-            existing_held_qty=record.qty_kg  # Give credit for the quantity being modified
+            existing_held_qty=record.qty_kg
         )
 
-        record.rm_code_id = rm_id
-        record.warehouse_id = wh_id
-        record.current_status_id = cur_st_id
-        record.new_status_id = new_st_id
-        record.qty_kg = target_qty
+        try:
+            record.rm_code_id = rm_id
+            record.warehouse_id = wh_id
+            record.current_status_id = cur_st_id
+            record.new_status_id = new_st_id
+            record.qty_kg = target_qty
+            record.updated_by_id = current_user.id
 
-        if payload.ref_number is not None:
-            record.ref_number = payload.ref_number.strip()
-        if payload.change_status_date is not None:
-            record.change_status_date = payload.change_status_date
-        if payload.updated_by_id is not None:
-            record.updated_by_id = payload.updated_by_id
+            if payload.ref_number is not None:
+                record.ref_number = payload.ref_number.strip()
+            if payload.change_status_date is not None:
+                record.change_status_date = payload.change_status_date
 
-        self.db.commit()
-        return self.crud.list_active()
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="UPDATE",
+                table_name="tbl_change_status_forms",
+                record_id=record.id,
+                payload=payload
+            )
 
-    def soft_delete_held_form(self, form_id: UUID) -> List[dict]:
-        """Soft-deletes a status change entry and returns the refreshed active list."""
+            self.db.commit()
+            self.db.refresh(record)
+            return record
+
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def soft_delete_held_form(
+        self,
+        form_id: UUID,
+        request: Request,
+        current_user: User
+    ) -> Dict[str, Any]:
+        """Soft-deletes a status change entry and records the audit trail atomically."""
         record = self.crud.get_by_id(form_id)
         if not record or record.is_deleted:
             raise HTTPException(
@@ -214,12 +255,35 @@ class TempHeldFormService(BaseService):
                 detail="Status Change record not found or already deleted."
             )
 
-        record.is_deleted = True
-        self.db.commit()
-        return self.crud.list_active()
+        try:
+            record.is_deleted = True
+            record.deleted_by_id = current_user.id
 
-    def restore_held_form(self, form_id: UUID) -> List[dict]:
-        """Restores a soft-deleted status change entry back to active status."""
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="SOFT_DELETE",
+                table_name="tbl_change_status_forms",
+                record_id=record.id,
+                payload={"ref_number": record.ref_number, "action": "soft_delete"}
+            )
+
+            self.db.commit()
+            return {"message": "Status change form soft-deleted successfully.", "id": str(form_id)}
+
+        except Exception as e:
+            self.db.rollback()
+            raise e
+
+    def restore_held_form(
+        self,
+        form_id: UUID,
+        request: Request,
+        current_user: User
+    ) -> Dict[str, Any]:
+        """Restores a soft-deleted status change entry back to active status atomically."""
         record = self.crud.get_by_id(form_id)
         if not record or not record.is_deleted:
             raise HTTPException(
@@ -236,6 +300,23 @@ class TempHeldFormService(BaseService):
             requested_qty=record.qty_kg
         )
 
-        record.is_deleted = False
-        self.db.commit()
-        return self.crud.list_active()
+        try:
+            record.is_deleted = False
+
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="RM_INVENTORY",
+                action="RESTORE",
+                table_name="tbl_change_status_forms",
+                record_id=record.id,
+                payload={"ref_number": record.ref_number, "action": "restore"}
+            )
+
+            self.db.commit()
+            return {"message": "Status change form restored successfully.", "id": str(form_id)}
+
+        except Exception as e:
+            self.db.rollback()
+            raise e

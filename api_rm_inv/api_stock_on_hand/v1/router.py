@@ -5,12 +5,14 @@ All endpoints use synchronous 'def' to allow threadpool concurrency
 across LAN workstations and include limit/offset pagination.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, File, UploadFile, status
+from fastapi import APIRouter, Depends, Query, File, UploadFile, status, Request, HTTPException
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
 from api_rm_inv.api_stock_on_hand.v1.schemas import (
     StockOnHandCreate,
     StockOnHandUpdate,
@@ -30,19 +32,18 @@ router = APIRouter(prefix="/api/v1/rm/stock-on-hand", tags=["Stock on Hand"])
 )
 def create_rm_soh(
     payload: StockOnHandCreate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    Initializes a Stock on Hand baseline row.
-    Accepts human business keys: rm_code, wh_number, status_name.
-    """
+    """Initializes an SOH baseline row and records the audit log atomically."""
     service = StockOnHandService(db)
-    return service.create_rm_soh(payload)
+    return service.create_rm_soh(payload, request, current_user)
 
 
 @router.get(
     "/list/",
-    response_model=List[StockOnHandResponse],
+    response_model=List[Dict[str, Any]],
     summary="List active Stock on Hand records (Paginated)"
 )
 def list_rm_soh(
@@ -50,17 +51,14 @@ def list_rm_soh(
     offset: int = Query(0, ge=0, description="Number of records to skip for pagination"),
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieves active SOH baseline records with pagination to prevent
-    loading millions of records into memory at once.
-    """
+    """Retrieves paginated active SOH baseline records."""
     service = StockOnHandService(db)
     return service.all_rm_soh(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/historical/",
-    response_model=List[HistoricalStockOnHandResponse],
+    response_model=List[Dict[str, Any]],
     summary="List historical computed Stock on Hand snapshots"
 )
 def get_historical_stock_on_hand(
@@ -73,10 +71,7 @@ def get_historical_stock_on_hand(
     offset: int = Query(0, ge=0, description="Records to skip for pagination"),
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieves computed historical SOH snapshots matching filter parameters.
-    Includes pagination to maintain fast response times across the LAN.
-    """
+    """Retrieves computed historical SOH snapshots with pagination."""
     service = StockOnHandService(db)
     return service.get_historical_stock_on_hand(
         date_from=date_from,
@@ -96,11 +91,13 @@ def get_historical_stock_on_hand(
 def update_rm_soh(
     rm_soh_id: UUID,
     payload: StockOnHandUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Modifies an existing SOH entry."""
+    """Modifies an existing SOH entry and records an audit log atomically."""
     service = StockOnHandService(db)
-    return service.update_rm_soh(rm_soh_id, payload)
+    return service.update_rm_soh(rm_soh_id, payload, request, current_user)
 
 
 @router.delete(
@@ -109,11 +106,13 @@ def update_rm_soh(
 )
 def delete_rm_soh(
     rm_soh_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Marks an SOH baseline row as deleted."""
+    """Marks an SOH baseline row as deleted atomically."""
     service = StockOnHandService(db)
-    return service.soft_delete_rm_soh(rm_soh_id)
+    return service.soft_delete_rm_soh(rm_soh_id, request, current_user)
 
 
 @router.put(
@@ -122,11 +121,13 @@ def delete_rm_soh(
 )
 def restore_rm_soh(
     rm_soh_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Reactivates a previously soft-deleted SOH entry."""
+    """Reactivates a previously soft-deleted SOH entry atomically."""
     service = StockOnHandService(db)
-    return service.restore_rm_soh(rm_soh_id)
+    return service.restore_rm_soh(rm_soh_id, request, current_user)
 
 
 @router.post(
@@ -134,14 +135,20 @@ def restore_rm_soh(
     summary="Batch import Stock on Hand from encrypted/unencrypted Excel"
 )
 def import_stock_data(
+    request: Request,
     file: UploadFile = File(...),
     password: Optional[str] = Query(None, description="Password if spreadsheet is encrypted"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    High-performance batch importer.
-    Pre-caches all lookups in memory and batch-saves all rows in one atomic commit.
-    """
-    content = file.file.read()
+    """High-performance batch importer with memory bounds and atomic audit trail."""
+    MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB boundary
+    content = file.file.read(MAX_FILE_SIZE + 1)
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File size exceeds the 25MB limit."
+        )
+
     service = StockOnHandService(db)
-    return service.import_rm_soh(content, password)
+    return service.import_rm_soh(content, request, current_user, password)

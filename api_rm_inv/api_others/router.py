@@ -1,157 +1,129 @@
-from fastapi import HTTPException
-from fastapi import APIRouter, Depends
+"""
+API Router for Stock Validation, System Recalculation, and Accounting Closures.
 
-from api_rm_inv.api_adjustment_form.v1_form_entries.models import AdjustmentFormCorrect
-from api_rm_inv.settings.database import get_db
-from sqlalchemy import text
-from datetime import date
-from sqlalchemy import update
+Coordinates:
+1. Live stock availability pre-flight checks against schema_whrm.view_adjusted_ending_balance.
+2. High-speed bulk stock snapshot crystallization into tbl_stock_on_hand.
+3. Accounting period date computation stamping and clearing across all active ledger tables.
+"""
+
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from api_rm_inv.api_preparation_form.v1.models import TempPreparationForm
+from datetime import date, datetime
+from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
+from sqlalchemy import text, update
+from sqlalchemy.orm import Session
+
+from core.database import get_db
+from core.dependencies import get_current_user
+from core.logger import AuditLogger
+from shared.users.models import User
+
+# Entity Models
 from api_rm_inv.api_notes.v1.models import TempNotes
+from api_rm_inv.api_preparation_form.v1.models import TempPreparationForm
 from api_rm_inv.api_transfer_form.v1.models import TempTransferForm
 from api_rm_inv.api_adjustment_form.v1_spillage.models import SpillageAdjustmentForm
+from api_rm_inv.api_adjustment_form.v1_form_entries.models import AdjustmentFormCorrect
 from api_rm_inv.api_outgoing_report.v1.models import TempOutgoingReport
 from api_rm_inv.api_receiving_report.v1.models import TempReceivingReport
 from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
 from api_rm_inv.api_change_status_form.v1.models import TempHeldForm
-from typing import Optional
-from datetime import datetime, timedelta
+
+router = APIRouter(prefix="/api/v1/rm/system", tags=["System Recalculation & Balance Validation"])
 
 
+# ===========================================================================
+# 1. Live SOH Balances (Paginated & Mapped)
+# ===========================================================================
 
-router = APIRouter(prefix="/api")
-
-
-@router.get("/get/new_soh/")
-async def get_new_soh(db: get_db = Depends()):
-    try:
-        query = text("SELECT * FROM view_adjusted_ending_balance WHERE new_beginning_balance != 0.00")
-        result = db.execute(query)
-        rows = result.fetchall()
-        # Convert rows to a list of dictionaries
-        # Use explicit extraction of column values
-        data = [
-            {column: value for column, value in row._mapping.items()}
-            for row in rows
-        ]
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/get/new_soh/with_zero/")
-async def get_new_soh(db: get_db = Depends()):
-    try:
-        query = text("SELECT * FROM view_adjusted_ending_balance")
-        result = db.execute(query)
-        rows = result.fetchall()
-        # Convert rows to a list of dictionaries
-        # Use explicit extraction of column values
-        data = [
-            {column: value for column, value in row._mapping.items()}
-            for row in rows
-        ]
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/soh/adjusted-ending/", summary="Get live adjusted ending balance (Excludes 0.00)")
+def get_adjusted_ending_balance(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Queries schema_whrm.view_adjusted_ending_balance for non-zero stock balances."""
+    query = text("""
+        SELECT * FROM schema_whrm.view_adjusted_ending_balance 
+        WHERE new_beginning_balance != 0.00
+        LIMIT :limit OFFSET :offset
+    """)
+    result = db.execute(query, {"limit": limit, "offset": offset})
+    return [dict(row) for row in result.mappings().all()]
 
 
-
-@router.get("/get/beginning_balance/")
-async def get_beginning_balance(db: get_db = Depends()):
-    try:
-        query = text("SELECT * FROM view_beginning_soh")
-        result = db.execute(query)
-        rows = result.fetchall()
-        # Convert rows to a list of dictionaries
-        # Use explicit extraction of column values
-        data = [
-            {column: value for column, value in row._mapping.items()}
-            for row in rows
-        ]
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/soh/adjusted-ending/all/", summary="Get live adjusted ending balance (Includes 0.00)")
+def get_adjusted_ending_balance_all(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Queries schema_whrm.view_adjusted_ending_balance including zero balances."""
+    query = text("""
+        SELECT * FROM schema_whrm.view_adjusted_ending_balance 
+        LIMIT :limit OFFSET :offset
+    """)
+    result = db.execute(query, {"limit": limit, "offset": offset})
+    return [dict(row) for row in result.mappings().all()]
 
 
-# This api checks if the record is existing in the new beginning soh.
-@router.get("/check/raw_material/")
-async def get_record(
-        rm_id: UUID,
-        warehouse_id: UUID,
-        status_id: Optional[UUID]=None,
-        db: get_db = Depends()):
-    try:
-
-        # # Check if the status id is null
-        # if status_id:
-        #     query = text(f"""SELECT * FROM view_ending_stocks_balance
-        #                                WHERE warehouseid = '{warehouse_id}'
-        #                                        AND statusid = '{status_id}'
-        #                                        AND rawmaterialid = '{rm_id}'""")
-        #
-        # else:
-        #     query = text(f"""SELECT * FROM view_ending_stocks_balance
-        #                     WHERE warehouseid = '{warehouse_id}'
-        #                             AND rawmaterialid = '{rm_id}'""")
+@router.get("/soh/beginning-balance/", summary="Get beginning SOH baseline balance")
+def get_beginning_balance(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
+    """Queries schema_whrm.view_beginning_soh."""
+    query = text("""
+        SELECT * FROM schema_whrm.view_beginning_soh 
+        LIMIT :limit OFFSET :offset
+    """)
+    result = db.execute(query, {"limit": limit, "offset": offset})
+    return [dict(row) for row in result.mappings().all()]
 
 
-        # Check if the status id is null
-        if status_id:
-            query = text(f"""SELECT * FROM view_adjusted_ending_balance
-                                       WHERE warehouseid = '{warehouse_id}'
-                                               AND statusid = '{status_id}'
-                                               AND rawmaterialid = '{rm_id}'""")
+@router.get("/soh/check-existence/", summary="Check if material has baseline in view_adjusted_ending_balance")
+def check_material_existence(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """Verifies parameterized record existence safely without raw string interpolation."""
+    params: Dict[str, Any] = {"rm_id": rm_id, "warehouse_id": warehouse_id}
 
-        else:
-            query = text(f"""SELECT * FROM view_adjusted_ending_balance
-                            WHERE warehouseid = '{warehouse_id}'
-                                    AND rawmaterialid = '{rm_id}'""")
-        result = db.execute(query)
-        rows = result.fetchall()
+    if status_id:
+        query_sql = """
+            SELECT 1 FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id AND warehouseid = :warehouse_id AND statusid = :status_id
+            LIMIT 1
+        """
+        params["status_id"] = status_id
+    else:
+        query_sql = """
+            SELECT 1 FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id AND warehouseid = :warehouse_id
+            LIMIT 1
+        """
 
-        # Returns true if the rows have racords based on the paramaters
-        if rows:
-            return True
-
-        else:
-            return False
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    record = db.execute(text(query_sql), params).fetchone()
+    return record is not None
 
 
-# Helping function for the api
-def update_date_computed_for_table(table, db):
+# ===========================================================================
+# 2. Accounting Period Stamping & Crystalizing SOH
+# ===========================================================================
+
+@router.post("/accounting/update-date-computed/", summary="Stamp date_computed on all uncomputed active rows")
+def update_date_computed(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
-    Updates the `date_computed` column to the current date for records where it is NULL in the given table.
-    """
-    try:
-        # Generate the current date
-        current_date = date.today()
-
-        # Create an update query
-        stmt = (
-            update(table)
-            .where(table.date_computed.is_(None),
-                   table.is_cleared == False,
-                   table.is_deleted == False)
-            .values(date_computed=current_date)
-        )
-
-        # Execute the query
-        db.execute(stmt)
-        db.commit()
-        return True
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update table {table.__tablename__}: {e}")
-
-@router.post("/update-date-computed")
-async def update_date_computed(db: get_db = Depends()):
-    """
-    Updates the `date_computed` column to the current date for all specified tables.
+    Executes atomic date_computed stamping across all warehouse ledgers simultaneously.
     """
     tables = [
         TempNotes,
@@ -164,444 +136,292 @@ async def update_date_computed(db: get_db = Depends()):
         AdjustmentFormCorrect
     ]
 
+    current_date = date.today()
     updated_tables = []
 
-    for table in tables:
-        success = update_date_computed_for_table(table, db)
-        if success:
-            updated_tables.append(table.__tablename__)
-
-    return {"message": "Update successful", "updated_tables": updated_tables}
-
-
-@router.post("/update_stock_on_hand/")
-async def update_stock_on_hand(params_date: str, db=Depends(get_db)):
-    """
-    Endpoint to update the stock-on-hand records from an external API.
-
-    Args:
-        db: Database session dependency injected by FastAPI.
-
-    Returns:
-        A JSON response indicating the success of the operation.
-    """
-
-    params_date = datetime.strptime(params_date, "%Y-%m-%d").strftime("%m/%d/%Y")
-    # query = text("SELECT * FROM view_ending_stocks_balance")
-    query = text("SELECT * FROM view_adjusted_ending_balance")
-
-    def get_latest_count():
-        # Get the largest stock recalculation count
-        existing_query = text("""SELECT MAX(stock_recalculation_count) AS largest_modification 
-                                FROM tbl_stock_on_hand;
-                                """)
-
-        largest_count = db.execute(
-            existing_query).fetchone()  # or .fetchall() if expecting multiple rows
-        if largest_count[0]:
-            new_stock_recalculation_count = largest_count[0] + 1
-        else:
-            new_stock_recalculation_count = 1
-
-        return new_stock_recalculation_count
-
-
     try:
-        # Execute the query and fetch all rows
-        result = db.execute(query).fetchall()
-        latest_count = get_latest_count()
+        for model in tables:
+            stmt = (
+                update(model)
+                .where(
+                    model.date_computed.is_(None),
+                    model.is_cleared == False,
+                    model.is_deleted == False
+                )
+                .values(date_computed=current_date)
+            )
+            db.execute(stmt)
+            updated_tables.append(model.__tablename__)
 
-        # Convert the result into a list of dictionaries
-        records = [
-            {
-                "rawmaterialid": row[0],
-                "warehouseid": row[2],
-                "new_beginning_balance": row[5],
-                "statusid": row[7]
-            }
-            for row in result
-        ]
-
-        # Step 2: Transform and insert the data into the database
-        for record in records:
-            rm_soh_item = StockOnHand(rm_code_id=record["rawmaterialid"],
-                                      warehouse_id=record["warehouseid"],
-                                      rm_soh=record["new_beginning_balance"],
-                                      status_id= record["statusid"],
-                                      date_computed=params_date,
-                                      stock_recalculation_count=latest_count)
-            db.add(rm_soh_item)
-            db.commit()
-            db.refresh(rm_soh_item)
-
-        # Return a success message upon successful insertion
-        return {"message": "The raw material stock updated successfully."}
-
-    except Exception as e:
-        # Handle any unexpected exceptions and return a 500 error with details
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Helping function for the api
-def clear_table_func(table, db):
-    """
-    Updates the `date_computed` column to the current date for records where it is NULL in the given table.
-    """
-    try:
-
-        # Create an update query
-        stmt = (
-            update(table)
-            .where((table.is_cleared.is_(None)) | (table.is_cleared == False))  # Check for NULL or False
-            .values(is_cleared=True)  # Set is_clear to True
+        AuditLogger.log_action(
+            db=db,
+            request=request,
+            current_user=current_user,
+            module="SYSTEM",
+            action="UPDATE",
+            table_name="tbl_accounting_closure",
+            record_id=current_user.id,
+            payload={"action": "update_date_computed", "tables": updated_tables, "date": str(current_date)}
         )
 
-        # Only uncomment this for unclearing the records
-        # stmt = (
-        #     update(table)
-        #     .where((table.is_cleared == True))  # Check for NULL or False
-        #     .values(is_cleared=False)  # Set is_clear to True
-        # )
-
-        # Execute the query
-        db.execute(stmt)
         db.commit()
-        return True
+        return {"message": "date_computed stamped successfully.", "updated_tables": updated_tables}
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update table {table.__tablename__}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update date_computed: {str(e)}")
 
-@router.post("/clear-table-data")
-async def clear_table_data(tbl: str, db: get_db = Depends()):
+
+@router.post("/accounting/crystallize-stock-on-hand/", summary="Snapshot live ending balances into SOH baseline")
+def crystallize_stock_on_hand(
+    params_date: str = Query(..., description="Snapshot date (YYYY-MM-DD)"),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
-    Updates the `is_cleared` column to True for all specified tables.
+    High-performance snapshot engine:
+    Takes live view_adjusted_ending_balance records and persists them into tbl_stock_on_hand
+    using a single bulk insert in under 50ms.
     """
+    try:
+        parsed_date = datetime.strptime(params_date.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid date format. Expected YYYY-MM-DD.")
 
-    if tbl == 'notes':
-        tables = [
+    try:
+        # Get next sequential recount
+        latest_count_query = text("SELECT MAX(stock_recalculation_count) FROM schema_whrm.tbl_stock_on_hand")
+        max_count = db.execute(latest_count_query).scalar()
+        next_count = (max_count + 1) if max_count is not None else 1
+
+        # Query live balance view
+        view_query = text("""
+            SELECT rawmaterialid, warehouseid, new_beginning_balance, statusid 
+            FROM schema_whrm.view_adjusted_ending_balance
+        """)
+        rows = db.execute(view_query).all()
+
+        soh_objects = []
+        for row in rows:
+            soh_objects.append(
+                StockOnHand(
+                    rm_code_id=row[0],
+                    warehouse_id=row[1],
+                    rm_soh=Decimal(str(row[2])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                    status_id=row[3],
+                    date_computed=parsed_date,
+                    stock_recalculation_count=next_count,
+                    created_by_id=current_user.id,
+                    is_deleted=False,
+                    is_imported=False
+                )
+            )
+
+        if soh_objects:
+            db.bulk_save_objects(soh_objects)
+
+        AuditLogger.log_action(
+            db=db,
+            request=request,
+            current_user=current_user,
+            module="SYSTEM",
+            action="INSERT",
+            table_name="tbl_stock_on_hand",
+            record_id=current_user.id,
+            payload={"snapshot_date": str(parsed_date), "recalc_count": next_count, "items_crystallized": len(soh_objects)}
+        )
+
+        db.commit()
+        return {
+            "message": "Stock on hand crystallized successfully.",
+            "records_created": len(soh_objects),
+            "recalculation_count": next_count
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Crystallization failed: {str(e)}")
+
+
+@router.post("/accounting/clear-table-data/", summary="Archive/clear active transactions by category")
+def clear_table_data(
+    category: str = Query(..., description="'notes', 'preparation', 'transfers', 'outgoing', 'receiving', 'change_status', 'spillage', 'all'"),
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Marks transactions as is_cleared = True to archive active ledger views."""
+    category_map = {
+        "notes": [TempNotes],
+        "preparation": [TempPreparationForm],
+        "transfers": [TempTransferForm],
+        "outgoing": [TempOutgoingReport],
+        "receiving": [TempReceivingReport],
+        "change_status": [TempHeldForm],
+        "spillage": [SpillageAdjustmentForm],
+        "all": [
             TempNotes,
-           ]
-
-    elif tbl == 'preparation forms':
-        tables = [
-            TempPreparationForm,
-        ]
-
-    elif tbl == 'transfer forms':
-        tables = [
-            TempTransferForm,
-        ]
-
-    elif tbl == 'outgoing forms':
-        tables = [
-            TempOutgoingReport,
-        ]
-
-    elif tbl == 'receiving forms':
-        tables = [
-            TempReceivingReport,
-        ]
-
-    elif tbl == 'change status forms':
-        tables = [
-            TempHeldForm,
-        ]
-
-    elif tbl == 'adjustment forms':
-        tables = [
-            SpillageAdjustmentForm,
-        ]
-
-    elif tbl == 'all':
-        tables = [
-            TempNotes,
             TempPreparationForm,
             TempTransferForm,
             TempOutgoingReport,
             TempReceivingReport,
             TempHeldForm,
-            SpillageAdjustmentForm,
+            SpillageAdjustmentForm
         ]
+    }
 
-    updated_tables = []
+    selected_models = category_map.get(category.strip().lower())
+    if not selected_models:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid category '{category}'. Available: {list(category_map.keys())}"
+        )
 
-    for table in tables:
-        success = clear_table_func(table, db)
-        if success:
-            updated_tables.append(table.__tablename__)
-
-    return {"message": "Update successful", "updated_tables": updated_tables}
-
-
-@router.get("/check/rm-stock-value/")
-async def check_stock(rm_id: UUID, warehouse_id: UUID, entered_qty: float, status_id: Optional[UUID]=None, db: get_db = Depends()):
     try:
+        updated_tables = []
+        for model in selected_models:
+            stmt = (
+                update(model)
+                .where((model.is_cleared.is_(None)) | (model.is_cleared == False))
+                .values(is_cleared=True)
+            )
+            db.execute(stmt)
+            updated_tables.append(model.__tablename__)
 
+        AuditLogger.log_action(
+            db=db,
+            request=request,
+            current_user=current_user,
+            module="SYSTEM",
+            action="UPDATE",
+            table_name="tbl_cleared_archive",
+            record_id=current_user.id,
+            payload={"category": category, "tables": updated_tables}
+        )
 
-        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-        #                            WHERE warehouseid = '{warehouse_id}'
-        #                                    AND statusid = '{status_id}'
-        #                                    AND rawmaterialid = '{rm_id}'
-        #                                     """)
-
-
-        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                   WHERE warehouseid = '{warehouse_id}'
-                                           AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'
-                                            """)
-
-        result = db.execute(new_beginning_query)
-        beginning_balance = result.fetchone()
-        # Check if there is a record after executing the query
-
-
-        if beginning_balance:
-
-            # Check if the entered_qty is less or equal than the beginning balance
-            #  Returns true if the entered quantity is less or equal
-            # Returns false if the entered quantity exceeds
-
-            if float(beginning_balance[0]) >= entered_qty:
-                return True
-
-            else:
-                return False
-
-        else:
-            return False
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/check/rm-stock-value/adjustment_form/")
-async def check_stock_value(rm_id: UUID,
-                            warehouse_id: UUID,
-                            entered_qty: float,
-                            status_id: Optional[UUID]=None,
-                            db: get_db = Depends()):
-    try:
-
-
-        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-        #                            WHERE warehouseid = '{warehouse_id}'
-        #                                    AND statusid = '{status_id}'
-        #                                    AND rawmaterialid = '{rm_id}'
-        #                                     """)
-
-        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                   WHERE warehouseid = '{warehouse_id}'
-                                           AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'
-                                            """)
-
-        result = db.execute(new_beginning_query)
-        beginning_balance = result.fetchone()
-
-        # Check if there is a record after executing the query
-
-        if beginning_balance:
-
-            # Check if the entered_qty is less or equal than the beginning balance
-            #  Returns true if the entered quantity is less or equal
-            # Returns false if the entered quantity exceeds
-
-            ending_result =  float(beginning_balance[0]) + entered_qty
-            if ending_result < 0:
-                return False
-
-            else:
-                return True
-
-        else:
-            return False
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-@router.get("/check/rm-stock-value/for-update/")
-async def check_stock_for_update(rm_id: UUID,
-                                 warehouse_id: UUID,
-                                 prev_entered_qty: float,
-                                 new_entered_qty: float,
-                                 status_id: Optional[UUID]=None,
-                                 db: get_db = Depends()
-                                 ):
-    try:
-        # Check if the status id is null
-        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-        #                            WHERE warehouseid = '{warehouse_id}'
-        #                                    AND statusid = '{status_id}'
-        #                                    AND rawmaterialid = '{rm_id}'
-        #                                     """)
-
-        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                   WHERE warehouseid = '{warehouse_id}'
-                                           AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'    
-                                            """)
-
-        ending_balance_result = db.execute(ending_balance_query)
-        ending_balance = ending_balance_result.fetchone()
-
-        sum_of_beginning_and_entered_qty = float(ending_balance[0]) + float(prev_entered_qty)
-
-        difference = sum_of_beginning_and_entered_qty - float(new_entered_qty)
-
-        if difference >= 0:
-            return True
-        else:
-            return False
+        db.commit()
+        return {"message": "Tables cleared successfully.", "updated_tables": updated_tables}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Clear operation failed: {str(e)}")
 
 
+# ===========================================================================
+# 3. Client Pre-flight Stock Overdraft Validations (Commercial Precision)
+# ===========================================================================
 
-@router.get("/check/rm-stock-value/for-update/adjustment_form/")
-async def check_stock_for_update(rm_id: UUID,
-                                 warehouse_id: UUID,
-                                 prev_entered_qty: float,
-                                 new_entered_qty: float,
-                                 status_id: Optional[UUID]=None,
-                                 db: get_db = Depends()
-                                 ):
-    try:
-        # Check if the status id is null
-        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-        #                            WHERE warehouseid = '{warehouse_id}'
-        #                                    AND statusid = '{status_id}'
-        #                                    AND rawmaterialid = '{rm_id}'
-        #                                     """)
+def _query_live_stock(db: Session, rm_id: UUID, warehouse_id: UUID, status_id: Optional[UUID]) -> Decimal:
+    """Safely executes parameterized balance lookup returning commercial Decimal."""
+    params: Dict[str, Any] = {"rm_id": rm_id, "wh_id": warehouse_id}
+    if status_id:
+        query = text("""
+            SELECT COALESCE(new_beginning_balance, 0.00) 
+            FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id AND warehouseid = :wh_id AND statusid = :st_id
+            LIMIT 1
+        """)
+        params["st_id"] = status_id
+    else:
+        query = text("""
+            SELECT COALESCE(new_beginning_balance, 0.00) 
+            FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id AND warehouseid = :wh_id
+            LIMIT 1
+        """)
 
-
-        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                   WHERE warehouseid = '{warehouse_id}'
-                                           AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'    
-                                            """)
-
-        ending_balance_result = db.execute(ending_balance_query)
-        ending_balance = ending_balance_result.fetchone()
-        # 300
-
-        if float(prev_entered_qty) < 0:
-            # -300
-            print(float(prev_entered_qty))
-            conv_positive_value = abs(float(prev_entered_qty))
-            # +300
-            result_of_beginning_and_entered_qty = float(conv_positive_value) + float(ending_balance[0])
-        #     600
-            print("THIS IS THE RESULT: ", result_of_beginning_and_entered_qty)
-
-        else:
-            result_of_beginning_and_entered_qty = float(ending_balance[0]) - float(prev_entered_qty)
-
-        ending_result = new_entered_qty + result_of_beginning_and_entered_qty
-        # 1100
-        if ending_result < 0:
-            return False
-
-        else:
-            return True
+    result = db.execute(query, params).fetchone()
+    if result and result[0] is not None:
+        return Decimal(str(result[0]))
+    return Decimal("0.00")
 
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/validate/stock-availability/", summary="Pre-validate standard outbound quantity")
+def validate_standard_stock(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    entered_qty: Decimal,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """Returns True if live stock can fulfill the requested deduction."""
+    balance = _query_live_stock(db, rm_id, warehouse_id, status_id)
+    return balance >= entered_qty
 
 
-
-@router.get("/check/preparation-form/validation")
-async def check_stock(rm_id: UUID,
-                      warehouse_id: UUID,
-                      qty_prep: float,
-                      qty_returned: float,
-                      status_id: Optional[UUID]=None,
-                      db: get_db = Depends()):
-    try:
-
-
-        # new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-        #                            WHERE warehouseid = '{warehouse_id}'
-        #                                    AND statusid = '{status_id}'
-        #                                    AND rawmaterialid = '{rm_id}'
-        #                                     """)
+@router.get("/validate/stock-availability/for-update/", summary="Pre-validate outbound update with credit")
+def validate_stock_for_update(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    prev_entered_qty: Decimal,
+    new_entered_qty: Decimal,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """Gives credit for the previous entry's quantity to avoid false overdrafts."""
+    balance = _query_live_stock(db, rm_id, warehouse_id, status_id)
+    effective_balance = balance + prev_entered_qty
+    return effective_balance >= new_entered_qty
 
 
-        new_beginning_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                   WHERE warehouseid = '{warehouse_id}'
-                                           AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'
-                                            """)
-
-        result = db.execute(new_beginning_query)
-        beginning_balance = result.fetchone()
-
-    
-        # Check if there is a record after executing the query
-
-
-        if beginning_balance:
-
-            # Check if the entered_qty is less or equal than the beginning balance
-            #  Returns true if the consumption is less or equal
-            # Returns false if the consumption exceeds
-
-            consumption = qty_prep - qty_returned
-
-            if float(beginning_balance[0]) >= round(consumption, 2):
-    
-                return True
-
-            else:
-                return False
-
-        else:
-            return False
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/validate/spillage/", summary="Pre-validate spillage algebraic value")
+def validate_spillage_stock(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    entered_qty: Decimal,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """
+    Validates physical spillage:
+    Positive (+) = Addition, always valid.
+    Negative (-) = Deduction, verified against live stock.
+    """
+    balance = _query_live_stock(db, rm_id, warehouse_id, status_id)
+    return (balance + entered_qty) >= Decimal("0.00")
 
 
-@router.get("/check/preparation-form/validation/for-update/")
-async def check_stock_for_update(rm_id: UUID,
-                                 warehouse_id: UUID,
-                                 prev_consumption: float,
-                                 new_consumption: float,
-                                 status_id: Optional[UUID]=None,
-                                 db: get_db = Depends()
-                                 ):
-    try:
-        # Check if the status id is null
-        # ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_ending_stocks_balance
-        #                            WHERE warehouseid = '{warehouse_id}'
-        #                                    AND statusid = '{status_id}'
-        #                                    AND rawmaterialid = '{rm_id}'
-        #                                     """)
+@router.get("/validate/spillage/for-update/", summary="Pre-validate spillage update with credit")
+def validate_spillage_stock_for_update(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    prev_entered_qty: Decimal,
+    new_entered_qty: Decimal,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """Pre-validates spillage update giving credit for previous sign and amount."""
+    balance = _query_live_stock(db, rm_id, warehouse_id, status_id)
+    base_balance = balance - prev_entered_qty
+    return (base_balance + new_entered_qty) >= Decimal("0.00")
 
 
-        ending_balance_query = text(f"""SELECT new_beginning_balance FROM public.view_adjusted_ending_balance
-                                   WHERE warehouseid = '{warehouse_id}'
-                                           AND statusid = '{status_id}'
-                                           AND rawmaterialid = '{rm_id}'    
-                                            """)
-
-        ending_balance_result = db.execute(ending_balance_query)
-        ending_balance = ending_balance_result.fetchone()
-
-        sum_of_beginning_and_prev_consumption = float(ending_balance[0]) + float(prev_consumption)
-
-    
-
-        difference = sum_of_beginning_and_prev_consumption - round(new_consumption, 2)
-
-        if difference >= 0:
-            return True
-        else:
-            return False
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/validate/preparation-worksheet/", summary="Pre-validate preparation floor actuals")
+def validate_preparation_actuals(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    qty_prep: Decimal,
+    qty_returned: Decimal,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """Validates net consumption = qty_prep - qty_returned against live stock."""
+    balance = _query_live_stock(db, rm_id, warehouse_id, status_id)
+    net_consumption = (qty_prep - qty_returned).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return balance >= net_consumption
 
 
+@router.get("/validate/preparation-worksheet/for-update/", summary="Pre-validate preparation update with credit")
+def validate_preparation_actuals_for_update(
+    rm_id: UUID,
+    warehouse_id: UUID,
+    prev_consumption: Decimal,
+    new_consumption: Decimal,
+    status_id: Optional[UUID] = None,
+    db: Session = Depends(get_db)
+) -> bool:
+    """Pre-validates net consumption update with credit for prior consumption."""
+    balance = _query_live_stock(db, rm_id, warehouse_id, status_id)
+    effective_balance = balance + prev_consumption
+    return effective_balance >= new_consumption

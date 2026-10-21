@@ -1,7 +1,7 @@
 """
 API Router for Form Entries Adjustment Endpoints.
 
-Provides dedicated routes for adjusting past transactions:
+Provides dedicated routes for adjusting past transactions across all five categories:
 - POST /create/receiving_form/
 - POST /create/outgoing_form/
 - POST /create/preparation_form/
@@ -10,7 +10,7 @@ Provides dedicated routes for adjusting past transactions:
 - GET /list/
 - GET /list/deleted/
 - GET /list/historical/
-- PUT /update/{adjustment_form_id}/
+- PUT /update/{form_type}/{adjustment_parent_id}/
 - DELETE /delete/{adjustment_form_id}/
 - PUT /restore/{adjustment_form_id}/
 - GET /entry_validation/
@@ -19,14 +19,24 @@ Provides dedicated routes for adjusting past transactions:
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, Request
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.dependencies import get_current_user
+from shared.users.models import User
 from api_rm_inv.api_adjustment_form.v1_form_entries.schemas import (
-    AdjustmentFormResponse, ReceivingAdjustmentCreate, OutgoingAdjustmentCreate, PreparationAdjustmentCreate,
-    TransferAdjustmentCreate, ChangeStatusAdjustmentCreate, ReceivingAdjustmentUpdate, OutgoingAdjustmentUpdate,
-    PreparationAdjustmentUpdate, TransferAdjustmentUpdate, ChangeStatusAdjustmentUpdate
+    AdjustmentFormResponse,
+    ReceivingAdjustmentCreate,
+    OutgoingAdjustmentCreate,
+    PreparationAdjustmentCreate,
+    TransferAdjustmentCreate,
+    ChangeStatusAdjustmentCreate,
+    ReceivingAdjustmentUpdate,
+    OutgoingAdjustmentUpdate,
+    PreparationAdjustmentUpdate,
+    TransferAdjustmentUpdate,
+    ChangeStatusAdjustmentUpdate
 )
 from api_rm_inv.api_adjustment_form.v1_form_entries.service import AdjustmentFormService
 
@@ -43,12 +53,14 @@ router = APIRouter(prefix="/api/v1/rm/adjustments/form-entries", tags=["Adjustme
     summary="Record an adjustment correction for a Receiving Report"
 )
 def create_receiving_adjustment(
-    payload: ReceivingAdjustmentCreate,  # <-- Dedicated clean schema!
-    db: Session = Depends(get_db)
+    payload: ReceivingAdjustmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Corrects historical human errors on past receiving reports."""
     service = AdjustmentFormService(db)
-    return service.create_adjustment_form(payload, "receiving form")
+    return service.create_adjustment_form(payload, "receiving form", request, current_user)
 
 
 @router.post(
@@ -57,12 +69,14 @@ def create_receiving_adjustment(
     summary="Record an adjustment correction for an Outgoing Report"
 )
 def create_outgoing_adjustment(
-    payload: OutgoingAdjustmentCreate,  # <-- Dedicated clean schema!
-    db: Session = Depends(get_db)
+    payload: OutgoingAdjustmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Corrects historical human errors on past outgoing reports."""
     service = AdjustmentFormService(db)
-    return service.create_adjustment_form(payload, "outgoing form")
+    return service.create_adjustment_form(payload, "outgoing form", request, current_user)
 
 
 @router.post(
@@ -71,12 +85,14 @@ def create_outgoing_adjustment(
     summary="Record an adjustment correction for a Preparation Form"
 )
 def create_preparation_adjustment(
-    payload: PreparationAdjustmentCreate,  # <-- Dedicated clean schema!
-    db: Session = Depends(get_db)
+    payload: PreparationAdjustmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Corrects historical human errors on past preparation forms."""
     service = AdjustmentFormService(db)
-    return service.create_adjustment_form(payload, "preparation form")
+    return service.create_adjustment_form(payload, "preparation form", request, current_user)
 
 
 @router.post(
@@ -85,12 +101,14 @@ def create_preparation_adjustment(
     summary="Record an adjustment correction for a Transfer Form"
 )
 def create_transfer_adjustment(
-    payload: TransferAdjustmentCreate,  # <-- Dedicated clean schema!
-    db: Session = Depends(get_db)
+    payload: TransferAdjustmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Corrects historical human errors on past transfer forms."""
     service = AdjustmentFormService(db)
-    return service.create_adjustment_form(payload, "transfer form")
+    return service.create_adjustment_form(payload, "transfer form", request, current_user)
 
 
 @router.post(
@@ -99,43 +117,53 @@ def create_transfer_adjustment(
     summary="Record an adjustment correction for a Change Status (Held) Form"
 )
 def create_change_status_adjustment(
-    payload: ChangeStatusAdjustmentCreate,  # <-- Dedicated clean schema!
-    db: Session = Depends(get_db)
+    payload: ChangeStatusAdjustmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Corrects historical human errors on past quality change forms."""
     service = AdjustmentFormService(db)
-    return service.create_adjustment_form(payload, "change status form")
+    return service.create_adjustment_form(payload, "change status form", request, current_user)
 
 
 # ===========================================================================
-# 2. Ledger Queries & Maintenance
+# 2. Ledger Queries
 # ===========================================================================
 
 @router.get(
     "/list/",
-    response_model=List[AdjustmentFormResponse],
-    summary="List active form adjustments"
+    response_model=List[Dict[str, Any]],
+    summary="List active form adjustments (Paginated)"
 )
-def read_adjustment_form(db: Session = Depends(get_db)):
+def read_adjustment_form(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves all active, un-cleared form adjustments for desktop grid display."""
     service = AdjustmentFormService(db)
-    return service.get_adjustment_form()
+    return service.get_adjustment_form(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/deleted/",
-    response_model=List[AdjustmentFormResponse],
-    summary="List soft-deleted form adjustments"
+    response_model=List[Dict[str, Any]],
+    summary="List soft-deleted form adjustments (Paginated)"
 )
-def read_deleted_adjustment_form(db: Session = Depends(get_db)):
+def read_deleted_adjustment_form(
+    limit: int = Query(100, ge=1, le=1000, description="Items to fetch"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db)
+):
     """Retrieves soft-deleted form adjustments for audit recovery."""
     service = AdjustmentFormService(db)
-    return service.get_deleted_adjustment_form()
+    return service.get_deleted_adjustment_form(limit=limit, offset=offset)
 
 
 @router.get(
     "/list/historical/",
-    response_model=List[AdjustmentFormResponse],
+    response_model=List[Dict[str, Any]],
     summary="List historical computed form adjustments"
 )
 def read_historical_adjustment_form(
@@ -147,10 +175,7 @@ def read_historical_adjustment_form(
     offset: int = Query(0, ge=0, description="Records to skip for pagination"),
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieves computed historical form adjustments with pagination
-    (default 50 rows) to keep response times fast across the LAN.
-    """
+    """Retrieves computed historical form adjustments with pagination."""
     service = AdjustmentFormService(db)
     return service.get_historical_adjustment_form(
         record_id=record_id,
@@ -163,7 +188,7 @@ def read_historical_adjustment_form(
 
 
 # ===========================================================================
-# 3. UPDATE
+# 3. Specialized Updates
 # ===========================================================================
 
 @router.put(
@@ -173,11 +198,12 @@ def read_historical_adjustment_form(
 def update_receiving_adjustment(
     adjustment_parent_id: UUID,
     payload: ReceivingAdjustmentUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Updates an existing Receiving Report correction."""
     service = AdjustmentFormService(db)
-    return service.update_adjustment_form(adjustment_parent_id, payload, "receiving form")
+    return service.update_adjustment_form(adjustment_parent_id, payload, "receiving form", request, current_user)
 
 
 @router.put(
@@ -187,11 +213,12 @@ def update_receiving_adjustment(
 def update_outgoing_adjustment(
     adjustment_parent_id: UUID,
     payload: OutgoingAdjustmentUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Updates an existing Outgoing Report correction."""
     service = AdjustmentFormService(db)
-    return service.update_adjustment_form(adjustment_parent_id, payload, "outgoing form")
+    return service.update_adjustment_form(adjustment_parent_id, payload, "outgoing form", request, current_user)
 
 
 @router.put(
@@ -201,11 +228,12 @@ def update_outgoing_adjustment(
 def update_preparation_adjustment(
     adjustment_parent_id: UUID,
     payload: PreparationAdjustmentUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Updates an existing Preparation Form correction."""
     service = AdjustmentFormService(db)
-    return service.update_adjustment_form(adjustment_parent_id, payload, "preparation form")
+    return service.update_adjustment_form(adjustment_parent_id, payload, "preparation form", request, current_user)
 
 
 @router.put(
@@ -215,11 +243,12 @@ def update_preparation_adjustment(
 def update_transfer_adjustment(
     adjustment_parent_id: UUID,
     payload: TransferAdjustmentUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Updates an existing Transfer Form correction."""
     service = AdjustmentFormService(db)
-    return service.update_adjustment_form(adjustment_parent_id, payload, "transfer form")
+    return service.update_adjustment_form(adjustment_parent_id, payload, "transfer form", request, current_user)
 
 
 @router.put(
@@ -229,39 +258,40 @@ def update_transfer_adjustment(
 def update_change_status_adjustment(
     adjustment_parent_id: UUID,
     payload: ChangeStatusAdjustmentUpdate,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Updates an existing Change Status Form correction."""
     service = AdjustmentFormService(db)
-    return service.update_adjustment_form(adjustment_parent_id, payload, "change status form")
+    return service.update_adjustment_form(adjustment_parent_id, payload, "change status form", request, current_user)
 
 
 @router.delete(
     "/delete/{adjustment_form_id}/",
-    response_model=List[AdjustmentFormResponse],
     summary="Soft-delete a form adjustment"
 )
 def delete_adjustment_form(
     adjustment_form_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Marks a correction line as deleted without breaking historical ledger balances."""
     service = AdjustmentFormService(db)
-    return service.soft_delete_adjustment_form(adjustment_form_id)
+    return service.soft_delete_adjustment_form(adjustment_form_id, request, current_user)
 
 
 @router.put(
     "/restore/{adjustment_form_id}/",
-    response_model=AdjustmentFormResponse,
     summary="Restore a soft-deleted form adjustment"
 )
 def restore_adjustment_form(
     adjustment_form_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    """Reactivates a previously soft-deleted correction entry."""
     service = AdjustmentFormService(db)
-    return service.restore_adjustment_form(adjustment_form_id)
+    return service.restore_adjustment_form(adjustment_form_id, request, current_user)
 
 
 @router.get(
@@ -277,10 +307,6 @@ def validate_adjustment_form(
     status_id: UUID = Query(..., description="UUID of the quality status"),
     db: Session = Depends(get_db)
 ):
-    """
-    Simulates applying the correction against view_adjusted_ending_balance
-    to verify that the change will not drive the warehouse into a negative stock deficit.
-    """
     service = AdjustmentFormService(db)
     return service.validate_adjustment_form(
         form=form.strip().lower(),

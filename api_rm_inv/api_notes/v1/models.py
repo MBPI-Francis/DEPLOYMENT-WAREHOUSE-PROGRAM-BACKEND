@@ -1,39 +1,51 @@
+"""
+Database Entity Model for Warehouse Notepad / Notes.
+
+Tracks batch notes, adjustments, and lot memos in schema_whrm.tbl_notes.
+"""
+
 import uuid
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Numeric, Date
+from datetime import datetime, timezone
+from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Date
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-from api_rm_inv.settings.database import Base  # Assuming Base is imported from your database setup
-from api_rm_inv.api_users.v1.models import User
+
+from core.database import Base
+from shared.users.models import User
+from api_rm_inv.api_product_kinds.v1.models import ProductKind
 
 
-# Parent Model: Department
 class TempNotes(Base):
     __tablename__ = "tbl_notes"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, index=True)
-    product_code = Column(String(80), nullable=False)
-    lot_number = Column(String(80), nullable=False)
-    product_kind_id = Column(String(10),  ForeignKey("tbl_product_kind.id"), nullable=False)
-    is_deleted = Column(Boolean, default=False)
+    product_code = Column(String(80), nullable=False, index=True)
+    lot_number = Column(String(80), nullable=False, index=True)
+    product_kind_id = Column(String(50), ForeignKey("tbl_product_kind.id"), nullable=False)
     stock_change_date = Column(Date, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=True)
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    is_cleared = Column(Boolean, default=False, nullable=False)
+    date_computed = Column(Date, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True
+    )
 
     created_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
     updated_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
     deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    date_computed = Column(Date, nullable=True)
-    is_cleared = Column(Boolean, default=False)
 
-
-    # Relationships for created_by, updated_by, and deleted_by
-    created_by = relationship("User", foreign_keys=[created_by_id], backref="created_tempnotes")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], backref="updated_tempnotes")
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id], backref="deleted_tempnotes")
-    product_kind = relationship("ProductKind", foreign_keys=[product_kind_id], backref="relationship_tempnotes")
-
-
-
-
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+    deleted_by = relationship("User", foreign_keys=[deleted_by_id])
+    product_kind = relationship("ProductKind", foreign_keys=[product_kind_id])

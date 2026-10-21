@@ -1,33 +1,54 @@
+"""
+Product Kind Database Entity Model.
+
+Represents product classification codes (e.g., Masterbatch 'MB', Dry Color 'DC')
+mapped to schema_whrm.tbl_product_kind.
+"""
+
 import uuid
-from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Numeric
+from datetime import datetime, timezone
+from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-from api_rm_inv.settings.database import Base  # Assuming Base is imported from your database setup
-from api_rm_inv.api_users.v1.models import User
+
+from core.database import Base
+from shared.users.models import User
 
 
-# Parent Model: Department
 class ProductKind(Base):
+    """
+    Database entity for product classifications.
+
+    Attributes:
+        id: Primary key string code (e.g., 'MB', 'DC').
+        name: Readable description of the classification.
+        description: Technical details or notes.
+        is_deleted: Soft delete flag.
+    """
     __tablename__ = "tbl_product_kind"
+    __table_args__ = {"schema": "schema_whrm", "extend_existing": True}
 
     id = Column(String(10), nullable=False, primary_key=True, unique=True, index=True)
     name = Column(String(80), nullable=False)
     description = Column(String(300), nullable=True)
-    is_deleted = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=True)
-    
-    created_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    updated_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
-    deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("tbl_users.id"), nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
 
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
-    # Relationships for created_by, updated_by, and deleted_by
-    created_by = relationship("User", foreign_keys=[created_by_id], backref="created_productkind")
-    updated_by = relationship("User", foreign_keys=[updated_by_id], backref="updated_productkind")
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id], backref="deleted_productkind")
+    created_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
+    updated_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
+    deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
 
-
-
+    # Relationships for audit display
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+    deleted_by = relationship("User", foreign_keys=[deleted_by_id])

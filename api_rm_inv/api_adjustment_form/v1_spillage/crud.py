@@ -3,10 +3,11 @@ Data Access Layer (CRUD) for Spillage Adjustment Forms.
 
 Queries schema_whrm.view_adjusted_ending_balance to verify available physical stock
 before allowing spillage losses to be written, avoiding negative stock balances.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, and_, func
 
@@ -73,14 +74,13 @@ class AdjustmentFormCRUD(BaseRepository):
         return self.db.query(SpillageAdjustmentForm).filter(SpillageAdjustmentForm.id == form_id).first()
 
     def create(self, record: SpillageAdjustmentForm) -> SpillageAdjustmentForm:
-        """Persists a new spillage record."""
+        """Stages a new spillage record in the active transaction."""
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
         return record
 
-    def list_active(self) -> List[dict]:
-        """Retrieves active, un-cleared spillage entries with joined readable names."""
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves active, un-cleared spillage entries with joined readable names and pagination."""
         records = (
             self.db.query(
                 SpillageAdjustmentForm.id,
@@ -111,12 +111,14 @@ class AdjustmentFormCRUD(BaseRepository):
                 or_(SpillageAdjustmentForm.is_deleted.is_(None), SpillageAdjustmentForm.is_deleted.is_(False))
             )
             .order_by(desc(SpillageAdjustmentForm.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
 
-    def list_deleted(self) -> List[dict]:
-        """Retrieves soft-deleted spillage records for audit recovery."""
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves soft-deleted spillage records for audit recovery with pagination."""
         records = (
             self.db.query(
                 SpillageAdjustmentForm.id,
@@ -143,6 +145,8 @@ class AdjustmentFormCRUD(BaseRepository):
             .outerjoin(User, SpillageAdjustmentForm.created_by_id == User.id)
             .filter(SpillageAdjustmentForm.is_deleted.is_(True))
             .order_by(desc(SpillageAdjustmentForm.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
@@ -157,11 +161,8 @@ class AdjustmentFormCRUD(BaseRepository):
         status_name: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
-        """
-        Retrieves computed historical spillage records with pagination and multi-field filtering.
-        Converts rows to dictionaries for high serialization throughput.
-        """
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical spillage records with pagination and multi-field filtering."""
         query = (
             self.db.query(
                 SpillageAdjustmentForm.id,

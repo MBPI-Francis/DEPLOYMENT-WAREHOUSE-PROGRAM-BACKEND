@@ -1,112 +1,174 @@
-from api_rm_inv.api_product_kinds.v1.exceptions import ProductKindCreateException, ProductKindNotFoundException, \
-    ProductKindUpdateException, ProductKindSoftDeleteException, ProductKindRestoreException
-from api_rm_inv.api_product_kinds.v1.main import AppCRUD, AppService
-from api_rm_inv.api_product_kinds.v1.models import ProductKind
-from api_rm_inv.api_product_kinds.v1.schemas import ProductKindCreate, ProductKindUpdate
+"""
+Business Service Layer for Product Kinds.
+
+Coordinates business rules, atomic transaction execution,
+and system audit trail logging.
+"""
+
+from typing import List
 from uuid import UUID
+from fastapi import HTTPException, status, Request
+from sqlalchemy.orm import Session
+
+from core.base import BaseService
+from core.logger import AuditLogger
+from shared.users.models import User
+from api_rm_inv.api_product_kinds.v1.crud import ProductKindCRUD
+from api_rm_inv.api_product_kinds.v1.schemas import ProductKindCreate, ProductKindUpdate, ProductKindResponse
 
 
-# These are the code for the app to communicate to the database
-class ProductKindCRUD(AppCRUD):
-    def create_product_kind(self, product_kind: ProductKindCreate):
-        product_kind_item = ProductKind(id=product_kind.id,
-                                        name=product_kind.name,
-                                        description=product_kind.description,
-                                        updated_by_id=product_kind.updated_by_id,
-                                        created_by_id=product_kind.created_by_id)
-        self.db.add(product_kind_item)
-        self.db.commit()
-        self.db.refresh(product_kind_item)
-        return product_kind_item
+class ProductKindService(BaseService):
+    """Business service coordinating product kinds and audit logging."""
 
-    def get_product_kind(self):
-        product_kind_item = self.db.query(ProductKind).all()
-        if product_kind_item:
-            return product_kind_item
-        return []
+    def __init__(self, db: Session):
+        super().__init__(db)
+        self.crud = ProductKindCRUD(db)
 
+    def create_product_kind(
+        self,
+        payload: ProductKindCreate,
+        request: Request,
+        current_user: User
+    ) -> ProductKindResponse:
+        """Validates unique classification code and stages record with audit log atomically."""
+        existing = self.crud.get_by_id(payload.id, include_deleted=True)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Product Kind with code '{payload.id}' already exists."
+            )
 
-    def update_product_kind(self, product_kind_id, product_kind_update: ProductKindUpdate):
         try:
-            product_kind = self.db.query(ProductKind).filter(ProductKind.id == product_kind_id).first()
-            if not product_kind or product_kind.is_deleted:
-                raise ProductKindNotFoundException(detail="Product Kind not found or already deleted.")
+            created = self.crud.create(payload, user_id=current_user.id)
 
-            for key, value in product_kind_update.model_dump(exclude_unset=True).items():
-                setattr(product_kind, key, value)
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="INSERT",
+                table_name="tbl_product_kind",
+                record_id=current_user.id,  # Use user_id for system audit if primary key is a string
+                payload={"kind_id": created.id, "name": created.name, "description": created.description}
+            )
+
             self.db.commit()
-            self.db.refresh(product_kind)
-            return product_kind
+            self.db.refresh(created)
+            return created
 
         except Exception as e:
-            raise ProductKindUpdateException(detail=f"Error: {str(e)}")
+            self.db.rollback()
+            raise e
 
-    def soft_delete_product_kind(self, product_kind_id):
+    def get_product_kind(self, limit: int = 100, offset: int = 0) -> List[ProductKindResponse]:
+        """Retrieves paginated active product classification kinds."""
+        return self.crud.get_all(limit=limit, offset=offset)
+
+    def update_product_kind(
+        self,
+        product_kind_id: str,
+        payload: ProductKindUpdate,
+        request: Request,
+        current_user: User
+    ) -> ProductKindResponse:
+        """Updates product kind details and commits with audit log atomically."""
+        record = self.crud.get_by_id(product_kind_id)
+        if not record or record.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product Kind not found or already deleted."
+            )
+
         try:
-            product_kind = self.db.query(ProductKind).filter(ProductKind.id == product_kind_id).first()
-            if not product_kind or product_kind.is_deleted:
-                raise ProductKindNotFoundException(detail="Product Kind not found or already deleted.")
+            updated = self.crud.update(record, payload, user_id=current_user.id)
 
-            product_kind.is_deleted = True
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="UPDATE",
+                table_name="tbl_product_kind",
+                record_id=current_user.id,
+                payload={"kind_id": product_kind_id, **payload.model_dump(exclude_unset=True)}
+            )
+
             self.db.commit()
-            self.db.refresh(product_kind)
-            return product_kind
+            self.db.refresh(updated)
+            return updated
 
         except Exception as e:
-            raise ProductKindSoftDeleteException(detail=f"Error: {str(e)}")
+            self.db.rollback()
+            raise e
 
+    def soft_delete_product_kind(
+        self,
+        product_kind_id: str,
+        request: Request,
+        current_user: User
+    ) -> ProductKindResponse:
+        """Soft-deletes a product classification kind atomically."""
+        record = self.crud.get_by_id(product_kind_id)
+        if not record or record.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product Kind not found or already deleted."
+            )
 
-    def restore_product_kind(self, product_kind_id):
         try:
-            product_kind = self.db.query(ProductKind).filter(ProductKind.id == product_kind_id).first()
-            if not product_kind or not product_kind.is_deleted:
-                raise ProductKindNotFoundException(detail="Product Kind not found or already restored.")
+            self.crud.set_deleted_flag(record, is_deleted=True, user_id=current_user.id)
 
-            product_kind.is_deleted = False
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="SOFT_DELETE",
+                table_name="tbl_product_kind",
+                record_id=current_user.id,
+                payload={"kind_id": product_kind_id, "action": "soft_delete"}
+            )
+
             self.db.commit()
-            self.db.refresh(product_kind)
-            return product_kind
+            self.db.refresh(record)
+            return record
 
         except Exception as e:
-            raise ProductKindRestoreException(detail=f"Error: {str(e)}")
+            self.db.rollback()
+            raise e
 
+    def restore_product_kind(
+        self,
+        product_kind_id: str,
+        request: Request,
+        current_user: User
+    ) -> ProductKindResponse:
+        """Restores a soft-deleted product classification kind atomically."""
+        record = self.crud.get_by_id(product_kind_id, include_deleted=True)
+        if not record or not record.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Product Kind is not in a deleted state."
+            )
 
-# These are the code for the business logic like calculation etc.
-class ProductKindService(AppService):
-    def create_product_kind(self, item: ProductKindCreate):
         try:
-            product_kind_item = ProductKindCRUD(self.db).create_product_kind(item)
+            self.crud.set_deleted_flag(record, is_deleted=False, user_id=current_user.id)
+
+            AuditLogger.log_action(
+                db=self.db,
+                request=request,
+                current_user=current_user,
+                module="SYSTEM",
+                action="RESTORE",
+                table_name="tbl_product_kind",
+                record_id=current_user.id,
+                payload={"kind_id": product_kind_id, "action": "restore"}
+            )
+
+            self.db.commit()
+            self.db.refresh(record)
+            return record
 
         except Exception as e:
-            raise ProductKindCreateException(detail=f"Error: {str(e)}")
-
-        return product_kind_item
-
-    def get_product_kind(self):
-        try:
-            product_kind_item = ProductKindCRUD(self.db).get_product_kind()
-
-        except Exception as e:
-            raise ProductKindNotFoundException(detail=f"Error: {str(e)}")
-        return product_kind_item
-
-    # This is the service/business logic in updating the product_kind.
-    def update_product_kind(self, product_kind_id, product_kind_update: ProductKindUpdate):
-        product_kind = ProductKindCRUD(self.db).update_product_kind(product_kind_id, product_kind_update)
-        return product_kind
-
-    # This is the service/business logic in soft deleting the product_kind.
-    def soft_delete_product_kind(self, product_kind_id):
-        product_kind = ProductKindCRUD(self.db).soft_delete_product_kind(product_kind_id)
-        return product_kind
-
-
-    # This is the service/business logic in soft restoring the product_kind.
-    def restore_product_kind(self, product_kind_id):
-        product_kind = ProductKindCRUD(self.db).restore_product_kind(product_kind_id)
-        return product_kind
-
-
-
-
-
+            self.db.rollback()
+            raise e

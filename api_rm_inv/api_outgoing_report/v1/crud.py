@@ -1,12 +1,13 @@
 """
-Data Access Layer (CRUD) for Outgoing Reports (v2).
+Data Access Layer (CRUD) for Outgoing Reports (v1).
 
 Queries schema_whrm.view_adjusted_ending_balance to verify available physical stock
 before allowing materials to be dispatched out of the warehouse.
+Strictly free of manual commits and HTTP exceptions.
 """
 
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy import text, desc, or_, and_, func
 
@@ -73,14 +74,13 @@ class TempOutgoingReportCRUD(BaseRepository):
         return self.db.query(TempOutgoingReport).filter(TempOutgoingReport.id == report_id).first()
 
     def create(self, record: TempOutgoingReport) -> TempOutgoingReport:
-        """Persists a new outgoing report entry."""
+        """Stages a new outgoing report entry in the active transaction."""
         self.db.add(record)
-        self.db.commit()
-        self.db.refresh(record)
+        self.db.flush()
         return record
 
-    def list_active(self) -> List[dict]:
-        """Retrieves active, un-cleared outgoing reports with readable joined data."""
+    def list_active(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves active, un-cleared outgoing reports with readable joined data and pagination."""
         records = (
             self.db.query(
                 TempOutgoingReport.id,
@@ -109,12 +109,14 @@ class TempOutgoingReportCRUD(BaseRepository):
                 or_(TempOutgoingReport.is_deleted.is_(None), TempOutgoingReport.is_deleted.is_(False))
             )
             .order_by(desc(TempOutgoingReport.created_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
 
-    def list_deleted(self) -> List[dict]:
-        """Retrieves soft-deleted outgoing reports for audit recovery."""
+    def list_deleted(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Retrieves soft-deleted outgoing reports for audit recovery with pagination."""
         records = (
             self.db.query(
                 TempOutgoingReport.id,
@@ -138,6 +140,8 @@ class TempOutgoingReportCRUD(BaseRepository):
             .outerjoin(User, TempOutgoingReport.created_by_id == User.id)
             .filter(TempOutgoingReport.is_deleted.is_(True))
             .order_by(desc(TempOutgoingReport.updated_at))
+            .limit(limit)
+            .offset(offset)
             .all()
         )
         return [dict(row._mapping) for row in records]
@@ -153,11 +157,8 @@ class TempOutgoingReportCRUD(BaseRepository):
         outgoing_type: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
-    ) -> List[dict]:
-        """
-        Retrieves computed historical outgoing records with pagination
-        and multi-field filtering. Converts rows to dictionaries for high serialization throughput.
-        """
+    ) -> List[Dict[str, Any]]:
+        """Retrieves computed historical outgoing records with pagination and multi-field filtering."""
         query = (
             self.db.query(
                 TempOutgoingReport.id,
