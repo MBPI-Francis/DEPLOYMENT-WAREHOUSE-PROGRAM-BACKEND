@@ -27,9 +27,6 @@ from api_rm_inv.settings.create_view_table import (
 from api_rm_inv.settings.create_product_kind import create_product_kind
 
 
-
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initializes schemas, tables, views, and maintenance tasks on server boot."""
@@ -118,3 +115,4 @@ def root():
         "schema": settings.DB_SCHEMA,
         "compression": "gzip_enabled"
     }
+

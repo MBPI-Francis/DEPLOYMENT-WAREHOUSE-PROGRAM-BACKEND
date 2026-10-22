@@ -40,7 +40,7 @@ from api_rm_inv.api_adjustment_form.v1_form_entries.schemas import (
 )
 from api_rm_inv.api_adjustment_form.v1_form_entries.service import AdjustmentFormService
 
-router = APIRouter(prefix="/api/v1/rm/adjustments/form-entries", tags=["Adjustments - Form Entries"])
+router = APIRouter(prefix="/adjustments/form-entries", tags=["Adjustments - Form Entries"])
 
 
 # ===========================================================================

@@ -12,15 +12,16 @@ def create_beginning_view_table():
     with engine.connect() as connection:
         connection.execute(text(CREATE_BEGGINING_VIEW_QUERY))
         connection.commit()
-        print("✅ View `view_beginning_soh` created successfully!")
-
+        # print("✅ View `view_beginning_soh` created successfully!")
+        print("INFO: View `view_beginning_soh` verified/created successfully.")
 
 def create_ending_view_table():
     """Ensures the view is created when FastAPI starts."""
     with engine.connect() as connection:
         connection.execute(text(CREATE_ENDING_VIEW_QUERY))
         connection.commit()
-        print("✅ View `view_ending_stocks_balance` created successfully!")
+        # print("✅ View `view_ending_stocks_balance` created successfully!")
+        print("INFO: View `view_ending_stocks_balance` verified/created successfully.")
 
 
 def create_adjusted_ending_view_table():
@@ -28,7 +29,8 @@ def create_adjusted_ending_view_table():
     with engine.connect() as connection:
         connection.execute(text(CREATE_ADJUSTED_ENDING_VIEW_QUERY))
         connection.commit()
-        print("✅ View `view_stock_ending_balance` created successfully!")
+        # print("✅ View `view_stock_ending_balance` created successfully!")
+        print("INFO: View `view_stock_ending_balance` verified/created successfully.")
 
 
 def create_view_form_entries_log_table():
@@ -36,7 +38,8 @@ def create_view_form_entries_log_table():
     with engine.connect() as connection:
         connection.execute(text(CREATE_VIEW_FORM_ENTRIES_LOG))
         connection.commit()
-        print("✅ View `view_form_entries_log` created successfully!")
+        # print("✅ View `view_form_entries_log` created successfully!")
+        print("INFO: View `view_form_entries_log` verified/created successfully.")
 
 
 

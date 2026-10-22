@@ -7,6 +7,7 @@ serving as the primary inbound inventory addition ledger in schema_whrm.
 
 import uuid
 from datetime import datetime, timezone, date
+from typing import Optional
 from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Date, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -64,9 +65,50 @@ class TempReceivingReport(Base):
     deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
 
     # Relationships for audit and display lookups
-    created_by = relationship("User", foreign_keys=[created_by_id])
-    updated_by = relationship("User", foreign_keys=[updated_by_id])
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id])
-    rm_code = relationship("RawMaterial", foreign_keys=[rm_code_id])
-    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
-    status = relationship("Status", foreign_keys=[status_id])
+    created_by_user = relationship("User", foreign_keys=[created_by_id])
+    updated_by_user = relationship("User", foreign_keys=[updated_by_id])
+    deleted_by_user = relationship("User", foreign_keys=[deleted_by_id])
+    rm_code_rel = relationship("RawMaterial", foreign_keys=[rm_code_id])
+    warehouse_rel = relationship("Warehouse", foreign_keys=[warehouse_id])
+    status_rel = relationship("Status", foreign_keys=[status_id])
+
+    # -----------------------------------------------------------------------
+    # Dynamic Properties matching TempReceivingReportResponse
+    # -----------------------------------------------------------------------
+    # These properties expose the human-readable strings directly on the
+    # model instance, allowing Pydantic's from_attributes=True to map them natively.
+
+    @property
+    def raw_material(self) -> str:
+        """Returns the natural material code string (e.g. 'RM-1001')."""
+        return self.rm_code_rel.rm_code if self.rm_code_rel else ""
+
+    @property
+    def rm_name(self) -> Optional[str]:
+        """Returns the friendly material name."""
+        return self.rm_code_rel.rm_name if self.rm_code_rel else None
+
+    @property
+    def wh_name(self) -> str:
+        """Returns the readable warehouse facility name (e.g. 'Warehouse 1')."""
+        return self.warehouse_rel.wh_name if self.warehouse_rel else ""
+
+    @property
+    def wh_number(self) -> Optional[str]:
+        """Returns the warehouse facility number."""
+        return str(self.warehouse_rel.wh_number) if self.warehouse_rel else None
+
+    @property
+    def status(self) -> str:
+        """Returns the quality status name string (e.g. 'good')."""
+        return self.status_rel.name if self.status_rel else ""
+
+    @property
+    def created_by(self) -> Optional[str]:
+        """Returns the creator's full name string (e.g. 'John Doe')."""
+        if self.created_by_user:
+            first = self.created_by_user.first_name or ""
+            last = self.created_by_user.last_name or ""
+            full = f"{first} {last}".strip()
+            return full if full else self.created_by_user.username
+        return None

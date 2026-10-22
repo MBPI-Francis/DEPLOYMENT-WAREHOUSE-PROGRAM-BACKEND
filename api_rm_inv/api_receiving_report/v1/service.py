@@ -55,11 +55,11 @@ class TempReceivingReportService(BaseService):
         return material.id, warehouse.id, status_record.id
 
     def create_receiving_report(
-        self,
-        payload: TempReceivingReportCreate,
-        request: Request,
-        current_user: User
-    ) -> TempReceivingReportResponse:
+            self,
+            payload: TempReceivingReportCreate,
+            request: Request,
+            current_user: User
+    ) -> TempReceivingReport:
         """
         Records an incoming shipment into the inventory ledger.
         Ensures a base StockOnHand row exists and commits both data and audit log atomically.
@@ -104,6 +104,8 @@ class TempReceivingReportService(BaseService):
             # 4. Atomic Commit
             self.db.commit()
             self.db.refresh(created)
+
+            # Works just like api_notes: Pydantic reads properties automatically
             return created
 
         except Exception as e:

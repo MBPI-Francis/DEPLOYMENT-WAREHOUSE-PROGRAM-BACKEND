@@ -16,7 +16,7 @@ from shared.users.models import User
 from api_rm_inv.api_notes.v1.schemas import NotesCreate, NotesUpdate, NotesResponse
 from api_rm_inv.api_notes.v1.service import NotesService
 
-router = APIRouter(prefix="/api/v1/rm/notes", tags=["Notes / Notepad"])
+router = APIRouter(prefix="/notes", tags=["Notes / Notepad"])
 
 
 @router.post(

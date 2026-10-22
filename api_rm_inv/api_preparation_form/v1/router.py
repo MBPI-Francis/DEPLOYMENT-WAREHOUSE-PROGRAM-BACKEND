@@ -34,7 +34,7 @@ from api_rm_inv.api_preparation_form.v1.schemas import (
 )
 from api_rm_inv.api_preparation_form.v1.service import PrepIntegrationService
 
-router = APIRouter(prefix="/api/v1/rm/preparation-forms", tags=["Preparation Forms"])
+router = APIRouter(prefix="/preparation-forms", tags=["Preparation Forms"])
 
 
 # ===========================================================================

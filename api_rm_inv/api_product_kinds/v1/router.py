@@ -15,7 +15,7 @@ from shared.users.models import User
 from api_rm_inv.api_product_kinds.v1.schemas import ProductKindCreate, ProductKindUpdate, ProductKindResponse
 from api_rm_inv.api_product_kinds.v1.service import ProductKindService
 
-router = APIRouter(prefix="/api/v1/rm/product-kinds", tags=["Product Kinds"])
+router = APIRouter(prefix="/product-kinds", tags=["Product Kinds"])
 
 
 @router.post(

@@ -31,7 +31,7 @@ from api_rm_inv.api_receiving_report.v1.models import TempReceivingReport
 from api_rm_inv.api_stock_on_hand.v1.models import StockOnHand
 from api_rm_inv.api_change_status_form.v1.models import TempHeldForm
 
-router = APIRouter(prefix="/api/v1/rm/system", tags=["System Recalculation & Balance Validation"])
+router = APIRouter(prefix="/system", tags=["System Recalculation & Balance Validation"])
 
 
 # ===========================================================================

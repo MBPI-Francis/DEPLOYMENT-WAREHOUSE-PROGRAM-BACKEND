@@ -291,10 +291,10 @@ class TempTransferFormService(BaseService):
             raise e
 
     def restore_transfer_form(
-        self,
-        transfer_id: UUID,
-        request: Request,
-        current_user: User
+            self,
+            transfer_id: UUID,
+            request: Request,
+            current_user: User
     ) -> Dict[str, Any]:
         """Restores a soft-deleted transfer record after re-validating origin stock."""
         record = self.crud.get_by_id(transfer_id)
@@ -304,12 +304,16 @@ class TempTransferFormService(BaseService):
                 detail="Transfer Form is not in a deleted state."
             )
 
-        # Ensure origin warehouse currently has stock before allowing restore
+        # 1. Safely extract facility numbers from relationship models
+        from_wh_num = str(record.from_warehouse_rel.wh_number) if record.from_warehouse_rel else "1"
+        to_wh_num = str(record.to_warehouse_rel.wh_number) if record.to_warehouse_rel else "2"
+
+        # 2. Re-validate stock availability using clean string properties
         self._resolve_and_validate(
-            rm_code=record.rm_code.rm_code,
-            from_wh_number=record.from_warehouse.wh_number,
-            to_wh_number=record.to_warehouse.wh_number,
-            status_name=record.status.name if record.status else "good",
+            rm_code=record.raw_material,  # Dynamic property -> returns 'RM-1001'
+            from_wh_number=from_wh_num,  # String -> '1'
+            to_wh_number=to_wh_num,  # String -> '2'
+            status_name=record.status or "good",  # Dynamic property -> returns 'good'
             requested_qty=record.qty_kg,
             existing_transfer_qty=Decimal("0.00")
         )
@@ -317,6 +321,7 @@ class TempTransferFormService(BaseService):
         try:
             record.is_deleted = False
 
+            # Stage the audit log entry
             AuditLogger.log_action(
                 db=self.db,
                 request=request,

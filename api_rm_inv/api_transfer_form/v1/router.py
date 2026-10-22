@@ -20,7 +20,7 @@ from api_rm_inv.api_transfer_form.v1.schemas import (
 )
 from api_rm_inv.api_transfer_form.v1.service import TempTransferFormService
 
-router = APIRouter(prefix="/api/v1/rm/transfer-forms", tags=["Transfer Forms"])
+router = APIRouter(prefix="/transfer-forms", tags=["Transfer Forms"])
 
 
 @router.post(

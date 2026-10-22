@@ -17,7 +17,7 @@ from shared.users.models import User
 from api_rm_inv.api_reports.v1.schemas import FormEntryResponse
 from api_rm_inv.api_reports.v1.service import FormEntryService
 
-router = APIRouter(prefix="/api/v1/rm/reports", tags=["Reports"])
+router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
 @router.get(

@@ -20,7 +20,7 @@ from api_rm_inv.api_supplies_outgoing_report.v1.schemas import (
 )
 from api_rm_inv.api_supplies_outgoing_report.v1.service import SuppliesOutgoingFormService
 
-router = APIRouter(prefix="/api/v1/rm/supplies-outgoing-reports", tags=["Supplies Outgoing Reports"])
+router = APIRouter(prefix="/supplies-outgoing-reports", tags=["Supplies Outgoing Reports"])
 
 
 @router.post(

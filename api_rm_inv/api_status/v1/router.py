@@ -21,7 +21,7 @@ from api_rm_inv.api_status.v1.schemas import (
 )
 from api_rm_inv.api_status.v1.service import StatusService
 
-router = APIRouter(prefix="/api/v1/rm/status", tags=["Status Management"])
+router = APIRouter(prefix="/status", tags=["Status Management"])
 
 
 @router.post(

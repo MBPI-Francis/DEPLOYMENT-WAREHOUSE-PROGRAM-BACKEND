@@ -20,7 +20,7 @@ from api_rm_inv.api_outgoing_report.v1.schemas import (
 )
 from api_rm_inv.api_outgoing_report.v1.service import TempOutgoingReportService
 
-router = APIRouter(prefix="/api/v1/rm/outgoing-reports", tags=["Outgoing Reports"])
+router = APIRouter(prefix="/outgoing-reports", tags=["Outgoing Reports"])
 
 
 @router.post(

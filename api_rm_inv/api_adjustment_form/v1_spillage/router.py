@@ -20,7 +20,7 @@ from api_rm_inv.api_adjustment_form.v1_spillage.schemas import (
 )
 from api_rm_inv.api_adjustment_form.v1_spillage.service import AdjustmentFormService
 
-router = APIRouter(prefix="/api/v1/rm/adjustments/spillage", tags=["Adjustments - Spillage"])
+router = APIRouter(prefix="/adjustments/spillage", tags=["Adjustments - Spillage"])
 
 
 @router.post(

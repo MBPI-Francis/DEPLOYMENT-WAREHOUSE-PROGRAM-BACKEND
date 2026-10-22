@@ -21,7 +21,7 @@ from api_rm_inv.api_stock_on_hand.v1.schemas import (
 )
 from api_rm_inv.api_stock_on_hand.v1.service import StockOnHandService
 
-router = APIRouter(prefix="/api/v1/rm/stock-on-hand", tags=["Stock on Hand"])
+router = APIRouter(prefix="/stock-on-hand", tags=["Stock on Hand"])
 
 
 @router.post(

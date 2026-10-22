@@ -20,7 +20,7 @@ from api_rm_inv.api_change_status_form.v1.schemas import (
 )
 from api_rm_inv.api_change_status_form.v1.service import TempHeldFormService
 
-router = APIRouter(prefix="/api/v1/rm/change-status-forms", tags=["Change Status Forms"])
+router = APIRouter(prefix="/change-status-forms", tags=["Change Status Forms"])
 
 
 @router.post(

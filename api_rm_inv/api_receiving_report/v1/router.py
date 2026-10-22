@@ -20,7 +20,7 @@ from api_rm_inv.api_receiving_report.v1.schemas import (
 )
 from api_rm_inv.api_receiving_report.v1.service import TempReceivingReportService
 
-router = APIRouter(prefix="/api/v1/rm/receiving-reports", tags=["Receiving Reports"])
+router = APIRouter(prefix="/receiving-reports", tags=["Receiving Reports"])
 
 
 @router.post(
