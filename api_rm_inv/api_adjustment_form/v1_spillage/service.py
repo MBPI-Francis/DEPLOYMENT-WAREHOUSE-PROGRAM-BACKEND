@@ -284,10 +284,10 @@ class AdjustmentFormService(BaseService):
             raise e
 
     def restore_adjustment_form(
-        self,
-        form_id: UUID,
-        request: Request,
-        current_user: User
+            self,
+            form_id: UUID,
+            request: Request,
+            current_user: User
     ) -> Dict[str, Any]:
         """Restores a soft-deleted spillage record after re-validating stock availability."""
         record = self.crud.get_by_id(form_id)
@@ -297,11 +297,13 @@ class AdjustmentFormService(BaseService):
                 detail="Spillage record is not in a deleted state."
             )
 
-        # Before restoring, verify warehouse still has enough stock to deduct (if negative)
+        wh_num = str(record.warehouse_rel.wh_number) if record.warehouse_rel else "1"
+
+        # Re-validate stock availability before allowing restore
         self._resolve_and_validate_stock(
-            rm_code=record.rm_code.rm_code,
-            wh_number=record.warehouse.wh_number,
-            status_name=record.status.name,
+            rm_code=record.raw_material,  # Dynamic property -> returns 'RM-1001'
+            wh_number=wh_num,  # String -> '1'
+            status_name=record.status or "good",  # Dynamic property -> returns 'good'
             requested_qty=record.qty_kg,
             existing_spillage_qty=Decimal("0.00")
         )
@@ -315,7 +317,7 @@ class AdjustmentFormService(BaseService):
                 current_user=current_user,
                 module="RM_INVENTORY",
                 action="RESTORE",
-                table_name="tbl_spillage_forms",
+                table_name="tbl_adjustment_spillage",
                 record_id=record.id,
                 payload={"ref_number": record.ref_number, "action": "restore"}
             )

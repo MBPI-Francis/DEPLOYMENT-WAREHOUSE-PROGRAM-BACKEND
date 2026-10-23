@@ -263,12 +263,11 @@ class TempOutgoingReportService(BaseService):
             raise e
 
     def restore_outgoing_report(
-        self,
-        report_id: UUID,
-        request: Request,
-        current_user: User
+            self,
+            report_id: UUID,
+            request: Request,
+            current_user: User
     ) -> Dict[str, Any]:
-        """Restores a soft-deleted outgoing report after re-validating stock availability."""
         record = self.crud.get_by_id(report_id)
         if not record or not record.is_deleted:
             raise HTTPException(
@@ -276,11 +275,13 @@ class TempOutgoingReportService(BaseService):
                 detail="Outgoing Report is not in a deleted state."
             )
 
-        # Before restoring, verify warehouse still has enough stock to deduct
+        wh_num = str(record.warehouse_rel.wh_number) if record.warehouse_rel else "1"
+
+        # Re-validate stock before allowing restore
         self._resolve_and_validate_stock(
-            rm_code=record.rm_code.rm_code,
-            wh_number=record.warehouse.wh_number,
-            status_name=record.status.name,
+            rm_code=record.raw_material,  # Uses property!
+            wh_number=wh_num,
+            status_name=record.status or "good",  # Uses property!
             requested_qty=record.qty_kg,
             existing_outgoing_qty=Decimal("0.00")
         )
