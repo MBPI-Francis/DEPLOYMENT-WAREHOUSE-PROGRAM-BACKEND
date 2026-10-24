@@ -10,7 +10,7 @@ Features:
 
 import io
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 import pandas as pd
@@ -68,6 +68,7 @@ class StockOnHandService(BaseService):
                 status_id=status_rec.id,
                 rm_soh=payload.rm_soh,
                 stock_recalculation_count=recalc_count,
+                stock_change_date=datetime.utcnow(),  # Pass naive datetime
                 description=payload.description,
                 created_by_id=current_user.id,
                 is_deleted=False,

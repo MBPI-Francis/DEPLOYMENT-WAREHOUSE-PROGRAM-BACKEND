@@ -27,7 +27,10 @@ router = APIRouter(prefix="/supplies-outgoing-reports", tags=["Supplies Outgoing
     "/create/",
     response_model=SuppliesOutgoingFormResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Record a supplies dispatch"
+    summary="Record a supplies dispatch",
+    responses={
+        422: {"description": "Insufficient warehouse stock or invalid business keys"}
+    }
 )
 def create_outgoing_report(
     payload: SuppliesOutgoingFormCreate,
@@ -35,7 +38,7 @@ def create_outgoing_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Records warehouse supplies dispatched out and logs the action atomically."""
+    """Records warehouse supplies dispatched out with live stock validation."""
     service = SuppliesOutgoingFormService(db)
     return service.create_outgoing_report(payload, request, current_user)
 
@@ -98,7 +101,7 @@ def update_outgoing_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Updates an existing supplies dispatch and records an audit log atomically."""
+    """Updates an existing supplies dispatch with stock re-validation."""
     service = SuppliesOutgoingFormService(db)
     return service.update_outgoing_report(outgoing_report_id, payload, request, current_user)
 

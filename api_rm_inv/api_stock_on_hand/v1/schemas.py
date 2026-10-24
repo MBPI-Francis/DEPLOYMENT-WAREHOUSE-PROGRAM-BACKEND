@@ -52,8 +52,7 @@ class StockOnHandUpdate(BaseModel):
 
 
 class StockOnHandResponse(BaseModel):
-    """Response DTO for standard SOH record representations."""
-    model_config = ConfigDict(from_attributes=True, coerce_numbers_to_str=True)
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     rm_code: str
@@ -66,12 +65,10 @@ class StockOnHandResponse(BaseModel):
     stock_change_date: datetime
     date_computed: Optional[date] = None
     description: Optional[str] = None
-
-
-    @field_validator("rm_soh", mode="before")
-    @classmethod
-    def round_response_weight(cls, v):
-        return _quantize_two_places(v)
+    created_by: Optional[str] = None
+    # If these fields exist in your schema, make them Optional:
+    # created_at: Optional[datetime] = None
+    # updated_at: Optional[datetime] = None
 
 
 class HistoricalStockOnHandResponse(BaseModel):

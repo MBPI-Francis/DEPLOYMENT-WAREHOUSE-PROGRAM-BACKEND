@@ -80,7 +80,7 @@ class AdjustmentFormCorrect(Base):
     incorrect_outgoing_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_outgoing_reports.id"), nullable=True)
     incorrect_preparation_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_preparation_forms.id"), nullable=True)
     incorrect_transfer_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_transfer_forms.id"), nullable=True)
-    incorrect_change_status_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_held_forms.id"), nullable=True)
+    incorrect_change_status_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_change_status_forms.id"), nullable=True)
 
     # Corrected attributes
     rm_code_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_raw_materials.id"), nullable=False)

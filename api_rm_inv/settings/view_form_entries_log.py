@@ -85,7 +85,7 @@ CREATE OR REPLACE VIEW schema_whrm.view_form_entries_log
                     WHEN hf.date_computed IS NOT NULL THEN 'Yes'::text
                     ELSE 'No'::text
                 END AS is_computed
-           FROM tbl_held_forms hf
+           FROM tbl_change_status_forms hf
              JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
              JOIN tbl_warehouses w ON hf.warehouse_id = w.id
              LEFT JOIN tbl_status s_current ON hf.current_status_id = s_current.id
@@ -105,7 +105,7 @@ CREATE OR REPLACE VIEW schema_whrm.view_form_entries_log
                     WHEN hf.date_computed IS NOT NULL THEN 'Yes'::text
                     ELSE 'No'::text
                 END AS is_computed
-           FROM tbl_held_forms hf
+           FROM tbl_change_status_forms hf
              JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
              JOIN tbl_warehouses w ON hf.warehouse_id = w.id
              LEFT JOIN tbl_status s_new ON hf.new_status_id = s_new.id
@@ -433,7 +433,7 @@ CREATE OR REPLACE VIEW schema_whrm.view_form_entries_log
                     ELSE 'No'::text
                 END AS is_computed
            FROM tbl_adjustment_correct tac
-             JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+             JOIN tbl_change_status_forms hf ON tac.incorrect_change_status_id = hf.id
              JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
              JOIN tbl_warehouses w ON hf.warehouse_id = w.id
              LEFT JOIN tbl_status s_current ON hf.current_status_id = s_current.id
@@ -455,7 +455,7 @@ CREATE OR REPLACE VIEW schema_whrm.view_form_entries_log
                     ELSE 'No'::text
                 END AS is_computed
            FROM tbl_adjustment_correct tac
-             JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+             JOIN tbl_change_status_forms hf ON tac.incorrect_change_status_id = hf.id
              JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
              JOIN tbl_warehouses w ON hf.warehouse_id = w.id
              LEFT JOIN tbl_status s_new ON hf.new_status_id = s_new.id
@@ -477,7 +477,7 @@ CREATE OR REPLACE VIEW schema_whrm.view_form_entries_log
                     ELSE 'No'::text
                 END AS is_computed
            FROM tbl_adjustment_correct tac
-             JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+             JOIN tbl_change_status_forms hf ON tac.incorrect_change_status_id = hf.id
              JOIN tbl_raw_materials rm ON tac.rm_code_id = rm.id
              JOIN tbl_warehouses w ON tac.warehouse_id = w.id
              LEFT JOIN tbl_status s_current ON tac.current_status_id = s_current.id
@@ -499,7 +499,7 @@ CREATE OR REPLACE VIEW schema_whrm.view_form_entries_log
                     ELSE 'No'::text
                 END AS is_computed
            FROM tbl_adjustment_correct tac
-             JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+             JOIN tbl_change_status_forms hf ON tac.incorrect_change_status_id = hf.id
              JOIN tbl_raw_materials rm ON tac.rm_code_id = rm.id
              JOIN tbl_warehouses w ON tac.warehouse_id = w.id
              LEFT JOIN tbl_status s_new ON tac.new_status_id = s_new.id

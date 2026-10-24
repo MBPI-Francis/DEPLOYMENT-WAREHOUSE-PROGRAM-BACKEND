@@ -1,13 +1,15 @@
 """
 Data Access Layer (CRUD) for Supplies Outgoing Reports.
 
-Handles queries and staged writes for general warehouse supplies dispatched out of the plant.
+Handles queries, staged writes, and stock availability verification against
+schema_whrm.view_adjusted_ending_balance.
 Strictly free of manual commits and HTTP exceptions.
 """
 
+from decimal import Decimal
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from sqlalchemy import or_, desc, func
+from sqlalchemy import text, or_, desc, func
 
 from core.base import BaseRepository
 from api_rm_inv.api_supplies_outgoing_report.v1.models import SuppliesOutgoingReport
@@ -22,19 +24,16 @@ class SuppliesOutgoingReportCRUD(BaseRepository):
     """Repository handling all database interactions for tbl_supplies_outgoing_reports."""
 
     def resolve_supply_material(self, rm_code: str) -> Optional[RawMaterial]:
-        """Resolves a supply catalog item by its code."""
+        """Resolves a supply item by code (accepts both SUPPLY and RM classifications)."""
         cleaned = rm_code.replace(" ", "").upper()
         return (
             self.db.query(RawMaterial)
-            .filter(
-                func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned,
-                RawMaterial.type == "SUPPLY"
-            )
+            .filter(func.replace(func.upper(RawMaterial.rm_code), " ", "") == cleaned)
             .first()
         )
 
     def resolve_warehouse(self, wh_number: str) -> Optional[Warehouse]:
-        """Resolves a warehouse by its facility number or name."""
+        """Resolves warehouse by number or name."""
         target = str(wh_number).strip()
         wh = self.db.query(Warehouse).filter(Warehouse.wh_number == target).first()
         if wh:
@@ -42,8 +41,31 @@ class SuppliesOutgoingReportCRUD(BaseRepository):
         return self.db.query(Warehouse).filter(Warehouse.wh_name.ilike(f"%{target}%")).first()
 
     def resolve_status(self, status_name: str) -> Optional[Status]:
-        """Resolves a status by name."""
+        """Resolves quality status by name."""
         return self.db.query(Status).filter(func.lower(Status.name) == status_name.strip().lower()).first()
+
+    def get_available_stock(self, rm_id: UUID, wh_id: UUID, status_id: UUID) -> Decimal:
+        """
+        Queries schema_whrm.view_adjusted_ending_balance for live inventory balance
+        before allowing an outbound supplies dispatch.
+        """
+        stock_query = text("""
+            SELECT COALESCE(new_beginning_balance, 0.00) AS balance
+            FROM schema_whrm.view_adjusted_ending_balance
+            WHERE rawmaterialid = :rm_id
+              AND warehouseid = :wh_id
+              AND statusid = :status_id
+            LIMIT 1
+        """)
+        record = self.db.execute(stock_query, {
+            "rm_id": rm_id,
+            "wh_id": wh_id,
+            "status_id": status_id
+        }).fetchone()
+
+        if record and record[0] is not None:
+            return Decimal(str(record[0]))
+        return Decimal("0.00")
 
     def get_by_id(self, report_id: UUID) -> Optional[SuppliesOutgoingReport]:
         """Fetches a single supplies outgoing report by UUID."""
@@ -71,7 +93,8 @@ class SuppliesOutgoingReportCRUD(BaseRepository):
                 SuppliesOutgoingReport.created_at,
                 SuppliesOutgoingReport.updated_at,
                 func.concat(User.first_name, " ", User.last_name).label("created_by"),
-                SuppliesOutgoingReport.date_computed
+                SuppliesOutgoingReport.date_computed,
+                SuppliesOutgoingReport.is_adjusted
             )
             .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)
             .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)
@@ -104,7 +127,8 @@ class SuppliesOutgoingReportCRUD(BaseRepository):
                 SuppliesOutgoingReport.created_at,
                 SuppliesOutgoingReport.updated_at,
                 func.concat(User.first_name, " ", User.last_name).label("created_by"),
-                SuppliesOutgoingReport.date_computed
+                SuppliesOutgoingReport.date_computed,
+                SuppliesOutgoingReport.is_adjusted
             )
             .join(RawMaterial, SuppliesOutgoingReport.rm_code_id == RawMaterial.id)
             .join(Warehouse, SuppliesOutgoingReport.warehouse_id == Warehouse.id)

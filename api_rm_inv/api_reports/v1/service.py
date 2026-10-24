@@ -51,21 +51,22 @@ class FormEntryService(BaseService):
         )
 
     def export_form_entries_to_excel_file(
-        self,
-        request: Request,
-        current_user: User,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-        mat_code: Optional[str] = None,
-        document_type: Optional[str] = None,
-        location: Optional[str] = None,
-        status: Optional[str] = None,
+            self,
+            request: Request,
+            current_user: User,
+            date_from: Optional[str] = None,
+            date_to: Optional[str] = None,
+            mat_code: Optional[str] = None,
+            document_type: Optional[str] = None,
+            location: Optional[str] = None,
+            status: Optional[str] = None,
     ) -> BytesIO:
         """
-        Streams database records into a Pandas DataFrame to generate
-        a two-sheet Excel file with detailed logs and an automated daily pivot table.
-        Uses constant-memory streaming mode to prevent RAM bloat.
+        Generates a reliable two-sheet Excel file (.xlsx):
+        - Sheet 1: Detailed individual transaction entries.
+        - Sheet 2: Daily Material Pivot Table summarizing net movements by day.
         """
+        # 1. Fetch raw dictionaries directly from view_form_entries_log
         raw_data = self.crud.get_form_entries_for_export(
             date_from=date_from,
             date_to=date_to,
@@ -89,60 +90,75 @@ class FormEntryService(BaseService):
         df_detailed = pd.DataFrame(raw_data)
 
         # -------------------------------------------------------------------
+        # Format Sheet 1 Data
+        # -------------------------------------------------------------------
+        # Cleanly convert dates and numerics
+        df_detailed['date_reported'] = pd.to_datetime(df_detailed['date_reported'], errors='coerce')
+        df_detailed['date_encoded'] = pd.to_datetime(df_detailed['date_encoded'], errors='coerce')
+        df_detailed['qty'] = pd.to_numeric(df_detailed['qty'], errors='coerce').fillna(0.0)
+
+        # String-formatted dates for clean Excel display
+        df_display_detailed = df_detailed.copy()
+        df_display_detailed['date_reported'] = df_display_detailed['date_reported'].dt.strftime('%Y-%m-%d')
+        df_display_detailed['date_encoded'] = df_display_detailed['date_encoded'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        # -------------------------------------------------------------------
         # Automated Daily RM Summary Pivot Table Generation
         # -------------------------------------------------------------------
-        df_detailed['date_reported'] = pd.to_datetime(df_detailed['date_reported'], errors='coerce')
         df_valid_dates = df_detailed.dropna(subset=['date_reported']).copy()
 
-        if df_valid_dates.empty:
-            with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-                pd.DataFrame({"Message": ["No valid date entries found for aggregation."]}).to_excel(
-                    writer, index=False, sheet_name="No Valid Dates"
-                )
-            excel_buffer.seek(0)
-            return excel_buffer
+        if not df_valid_dates.empty and 'mat_code' in df_valid_dates.columns:
+            # Group by material code and ISO date string (YYYY-MM-DD for natural chronological sorting)
+            df_valid_dates['Date_Col'] = df_valid_dates['date_reported'].dt.strftime('%Y-%m-%d')
 
-        # Convert Decimal values to numeric floats for vectorized aggregation
-        df_valid_dates['qty'] = pd.to_numeric(df_valid_dates['qty'], errors='coerce').fillna(0.0)
-        df_valid_dates['Date'] = df_valid_dates['date_reported'].dt.strftime('%m/%d/%Y')
+            df_pivot = df_valid_dates.pivot_table(
+                index='mat_code',
+                columns='Date_Col',
+                values='qty',
+                aggfunc='sum',
+                fill_value=0.0
+            )
 
-        df_long = df_valid_dates.groupby(['mat_code', 'Date'])['qty'].sum().reset_index()
-
-        df_pivot = df_long.pivot_table(
-            index='mat_code',
-            columns='Date',
-            values='qty',
-            fill_value=0.0
-        ).sort_index(ascending=True)
-
-        sorted_cols = pd.to_datetime(df_pivot.columns, format='%m/%d/%Y', errors='coerce').sort_values().dropna()
-        sorted_col_names = sorted_cols.strftime('%m/%d/%Y').tolist()
-        df_pivot = df_pivot[sorted_col_names].reset_index()
+            # Sort date columns chronologically
+            sorted_date_cols = sorted(list(df_pivot.columns))
+            df_pivot = df_pivot[sorted_date_cols].reset_index()
+        else:
+            df_pivot = pd.DataFrame({"Message": ["No valid date entries found for pivot aggregation."]})
 
         # -------------------------------------------------------------------
-        # Write Excel Workbook with Constant-Memory Optimization
+        # Write Excel Workbook
         # -------------------------------------------------------------------
-        writer_options = {"constant_memory": True}
-        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter", engine_kwargs={"options": writer_options}) as writer:
-            # Sheet 1: Detailed Logs
-            df_detailed.to_excel(writer, index=False, sheet_name="Detailed Data")
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            # Sheet 1: Detailed Data
+            df_display_detailed.to_excel(writer, index=False, sheet_name="Detailed Data")
 
-            # Sheet 2: Daily Material Pivot
+            # Sheet 2: Daily RM Summary
             df_pivot.to_excel(writer, index=False, sheet_name="Daily RM Summary")
 
             workbook = writer.book
-            if 'Daily RM Summary' in writer.sheets:
-                summary_sheet = writer.sheets['Daily RM Summary']
-                summary_sheet.set_column(0, 0, 20)
-                for col_idx in range(1, len(df_pivot.columns)):
-                    summary_sheet.set_column(col_idx, col_idx, 14)
 
+            # Format Sheet 1 Column Widths
             if 'Detailed Data' in writer.sheets:
-                detail_sheet = writer.sheets['Detailed Data']
-                detail_sheet.set_column('A:H', 18)
+                worksheet1 = writer.sheets['Detailed Data']
+                for idx, col in enumerate(df_display_detailed.columns):
+                    max_len = max(
+                        df_display_detailed[col].astype(str).map(len).max(),
+                        len(str(col))
+                    ) + 3
+                    worksheet1.set_column(idx, idx, min(max_len, 35))
+
+            # Format Sheet 2 Column Widths
+            if 'Daily RM Summary' in writer.sheets:
+                worksheet2 = writer.sheets['Daily RM Summary']
+                for idx, col in enumerate(df_pivot.columns):
+                    max_len = max(
+                        df_pivot[col].astype(str).map(len).max(),
+                        len(str(col))
+                    ) + 3
+                    worksheet2.set_column(idx, idx, min(max_len, 25))
 
         # -------------------------------------------------------------------
-        # Audit Log Recording for Data Export Event
+        # Audit Log Recording
         # -------------------------------------------------------------------
         try:
             AuditLogger.log_action(

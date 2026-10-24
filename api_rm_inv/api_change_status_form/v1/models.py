@@ -1,12 +1,12 @@
 """
-Change Status (Held Form) Database Entity Model.
+Database Entity Model for Quality Status Change (Held) Forms.
 
-Represents quality reclassifications (e.g., releasing from evaluation to good,
-or quarantining to contaminated/rejected) mapped to schema_whrm.tbl_held_forms.
+Represents material quality reclassifications in schema_whrm.tbl_change_status_forms.
 """
 
 import uuid
 from datetime import datetime, timezone, date
+from typing import Optional
 from sqlalchemy import Column, String, ForeignKey, DateTime, Boolean, Date, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -19,13 +19,7 @@ from shared.users.models import User
 
 
 class TempHeldForm(Base):
-    """
-    Database entity for Quality Status Change Forms (Held Forms).
-
-    Tracks material shifting from current_status_id (deducted)
-    to new_status_id (added) within schema_whrm.view_ending_stocks_balance.
-    """
-    __tablename__ = "tbl_held_forms"
+    __tablename__ = "tbl_change_status_forms"
     __table_args__ = {"schema": "schema_whrm", "extend_existing": True}
 
     id = Column(
@@ -64,11 +58,55 @@ class TempHeldForm(Base):
     updated_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
     deleted_by_id = Column(UUID(as_uuid=True), ForeignKey("schema_whrm.tbl_users.id"), nullable=True)
 
-    # Relationships for audit display
-    created_by = relationship("User", foreign_keys=[created_by_id])
-    updated_by = relationship("User", foreign_keys=[updated_by_id])
-    deleted_by = relationship("User", foreign_keys=[deleted_by_id])
-    rm_code = relationship("RawMaterial", foreign_keys=[rm_code_id])
-    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
-    current_status = relationship("Status", foreign_keys=[current_status_id])
-    new_status = relationship("Status", foreign_keys=[new_status_id])
+    # Clean relationships (Named cleanly to prevent property name collisions)
+    created_by_user = relationship("User", foreign_keys=[created_by_id])
+    updated_by_user = relationship("User", foreign_keys=[updated_by_id])
+    deleted_by_user = relationship("User", foreign_keys=[deleted_by_id])
+    rm_code_rel = relationship("RawMaterial", foreign_keys=[rm_code_id])
+    warehouse_rel = relationship("Warehouse", foreign_keys=[warehouse_id])
+    current_status_rel = relationship("Status", foreign_keys=[current_status_id])
+    new_status_rel = relationship("Status", foreign_keys=[new_status_id])
+
+    # -----------------------------------------------------------------------
+    # Dynamic Properties matching TempHeldFormResponse
+    # -----------------------------------------------------------------------
+
+    @property
+    def raw_material(self) -> str:
+        """Returns the natural material code string (e.g. 'RM-1001')."""
+        return self.rm_code_rel.rm_code if self.rm_code_rel else ""
+
+    @property
+    def rm_name(self) -> Optional[str]:
+        """Returns the friendly material name."""
+        return self.rm_code_rel.rm_name if self.rm_code_rel else None
+
+    @property
+    def wh_name(self) -> str:
+        """Returns the readable warehouse facility name (e.g. 'Warehouse 1')."""
+        return self.warehouse_rel.wh_name if self.warehouse_rel else ""
+
+    @property
+    def wh_number(self) -> Optional[str]:
+        """Returns the warehouse facility number."""
+        return str(self.warehouse_rel.wh_number) if self.warehouse_rel else None
+
+    @property
+    def current_status(self) -> str:
+        """Returns the origin quality status name string (e.g. 'held : contaminated')."""
+        return self.current_status_rel.name if self.current_status_rel else ""
+
+    @property
+    def new_status(self) -> str:
+        """Returns the new quality status name string (e.g. 'good')."""
+        return self.new_status_rel.name if self.new_status_rel else ""
+
+    @property
+    def created_by(self) -> Optional[str]:
+        """Returns the creator's full name string."""
+        if self.created_by_user:
+            first = self.created_by_user.first_name or ""
+            last = self.created_by_user.last_name or ""
+            full = f"{first} {last}".strip()
+            return full if full else self.created_by_user.username
+        return None

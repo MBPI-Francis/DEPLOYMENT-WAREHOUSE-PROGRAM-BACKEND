@@ -1,10 +1,11 @@
 """
 Business Service Layer for Supplies Outgoing Reports.
 
-Coordinates supplies validation, identifier resolution (codes to UUIDs),
-atomic audit logging, and single-commit transaction execution.
+Coordinates natural business key resolution (rm_code, wh_number, status_name),
+live stock overdraft checks, atomic audit logging, and single-commit transactions.
 """
 
+from decimal import Decimal
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from fastapi import HTTPException, status, Request
@@ -17,8 +18,7 @@ from api_rm_inv.api_supplies_outgoing_report.v1.crud import SuppliesOutgoingRepo
 from api_rm_inv.api_supplies_outgoing_report.v1.models import SuppliesOutgoingReport
 from api_rm_inv.api_supplies_outgoing_report.v1.schemas import (
     SuppliesOutgoingFormCreate,
-    SuppliesOutgoingFormUpdate,
-    SuppliesOutgoingFormResponse
+    SuppliesOutgoingFormUpdate
 )
 
 
@@ -29,36 +29,61 @@ class SuppliesOutgoingFormService(BaseService):
         super().__init__(db)
         self.crud = SuppliesOutgoingReportCRUD(db)
 
-    def _resolve_foreign_keys(self, payload: SuppliesOutgoingFormCreate) -> tuple[UUID, UUID, UUID]:
-        """Resolves natural keys or UUIDs into guaranteed database UUIDs."""
-        # 1. Resolve Supply Material
-        rm_id = payload.rm_code_id
-        if not rm_id and hasattr(payload, "rm_code") and payload.rm_code:
-            mat = self.crud.resolve_supply_material(payload.rm_code)
-            if not mat:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Supply material '{payload.rm_code}' not found.")
-            rm_id = mat.id
+    def _resolve_and_validate_stock(
+        self,
+        rm_code: str,
+        wh_number: str,
+        status_name: str,
+        requested_qty: Decimal,
+        existing_qty: Decimal = Decimal("0.00")
+    ) -> tuple[UUID, UUID, UUID]:
+        """
+        Resolves human business keys into database UUIDs and checks live stock:
+        1. Material lookup by rm_code.
+        2. Warehouse lookup by wh_number.
+        3. Status lookup by status_name.
+        4. Validates requested_qty <= live stock in view_adjusted_ending_balance.
+        """
+        # 1. Resolve Material
+        mat = self.crud.resolve_supply_material(rm_code)
+        if not mat:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Supply material with code '{rm_code}' does not exist in catalog."
+            )
 
         # 2. Resolve Warehouse
-        wh_id = payload.warehouse_id
-        if not wh_id and hasattr(payload, "wh_number") and payload.wh_number:
-            wh = self.crud.resolve_warehouse(str(payload.wh_number))
-            if not wh:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Warehouse '{payload.wh_number}' not found.")
-            wh_id = wh.id
+        wh = self.crud.resolve_warehouse(wh_number)
+        if not wh:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Warehouse '{wh_number}' does not exist."
+            )
 
         # 3. Resolve Status
-        st_id = payload.status_id
-        if not st_id and hasattr(payload, "status_name") and payload.status_name:
-            st = self.crud.resolve_status(payload.status_name)
-            if not st:
-                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Status '{payload.status_name}' not found.")
-            st_id = st.id
+        effective_status = status_name.strip() if status_name else "good"
+        st = self.crud.resolve_status(effective_status)
+        if not st:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Quality status '{effective_status}' does not exist."
+            )
 
-        if not all([rm_id, wh_id, st_id]):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Missing required material, warehouse, or status identifiers.")
+        # 4. Live Stock Balance Check
+        live_stock = self.crud.get_available_stock(mat.id, wh.id, st.id)
+        effective_stock = live_stock + existing_qty
 
-        return rm_id, wh_id, st_id
+        if requested_qty > effective_stock:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Insufficient stock for supply item '{rm_code}' in Warehouse '{wh_number}' "
+                    f"under status '{effective_status}'. "
+                    f"Available stock: {effective_stock:.2f} kg, Requested dispatch: {requested_qty:.2f} kg."
+                )
+            )
+
+        return mat.id, wh.id, st.id
 
     def create_outgoing_report(
         self,
@@ -66,8 +91,14 @@ class SuppliesOutgoingFormService(BaseService):
         request: Request,
         current_user: User
     ) -> SuppliesOutgoingReport:
-        """Records an outbound supplies dispatch and logs the event atomically."""
-        rm_id, wh_id, st_id = self._resolve_foreign_keys(payload)
+        """Records an outbound supplies dispatch using pure human business keys."""
+        rm_id, wh_id, st_id = self._resolve_and_validate_stock(
+            rm_code=payload.rm_code,
+            wh_number=payload.wh_number,
+            status_name=payload.status_name,
+            requested_qty=payload.qty_kg,
+            existing_qty=Decimal("0.00")
+        )
 
         try:
             record = SuppliesOutgoingReport(
@@ -77,7 +108,7 @@ class SuppliesOutgoingFormService(BaseService):
                 ref_number=payload.ref_number.strip(),
                 outgoing_date=payload.outgoing_date,
                 qty_kg=payload.qty_kg,
-                created_by_id=current_user.id,
+                created_by_id=current_user.id,  # Stamped from JWT / X-API-Key
                 is_deleted=False,
                 is_cleared=False,
                 is_adjusted=False
@@ -127,17 +158,38 @@ class SuppliesOutgoingFormService(BaseService):
         request: Request,
         current_user: User
     ) -> SuppliesOutgoingReport:
-        """Modifies a supplies outgoing report and records an audit log atomically."""
+        """Modifies a supplies outgoing report with live stock re-validation."""
         record = self.crud.get_by_id(report_id)
         if not record or record.is_deleted:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Supplies outgoing report not found or already deleted.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Supplies outgoing report not found or already deleted."
+            )
+
+        target_rm = payload.rm_code or record.raw_material
+        target_wh = payload.wh_number or (str(record.warehouse_rel.wh_number) if record.warehouse_rel else "1")
+        target_status = payload.status_name or record.status
+        target_qty = payload.qty_kg if payload.qty_kg is not None else record.qty_kg
+
+        rm_id, wh_id, st_id = self._resolve_and_validate_stock(
+            rm_code=target_rm,
+            wh_number=target_wh,
+            status_name=target_status,
+            requested_qty=target_qty,
+            existing_qty=record.qty_kg
+        )
 
         try:
-            update_data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
-            for key, value in update_data.items():
-                setattr(record, key, value)
-
+            record.rm_code_id = rm_id
+            record.warehouse_id = wh_id
+            record.status_id = st_id
+            record.qty_kg = target_qty
             record.updated_by_id = current_user.id
+
+            if payload.ref_number is not None:
+                record.ref_number = payload.ref_number.strip()
+            if payload.outgoing_date is not None:
+                record.outgoing_date = payload.outgoing_date
 
             AuditLogger.log_action(
                 db=self.db,
@@ -197,10 +249,20 @@ class SuppliesOutgoingFormService(BaseService):
         request: Request,
         current_user: User
     ) -> Dict[str, Any]:
-        """Restores a soft-deleted supplies report atomically."""
+        """Restores a soft-deleted supplies report after re-validating stock availability."""
         record = self.crud.get_by_id(report_id)
         if not record or not record.is_deleted:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Supplies outgoing report is not in a deleted state.")
+
+        wh_num = str(record.warehouse_rel.wh_number) if record.warehouse_rel else "1"
+
+        self._resolve_and_validate_stock(
+            rm_code=record.raw_material,
+            wh_number=wh_num,
+            status_name=record.status or "good",
+            requested_qty=record.qty_kg,
+            existing_qty=Decimal("0.00")
+        )
 
         try:
             record.is_deleted = False

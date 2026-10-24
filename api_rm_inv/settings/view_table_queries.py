@@ -191,7 +191,7 @@ CREATE_ENDING_VIEW_QUERY = """
                         ELSE 0::numeric
                     END) AS total_released,
                 hf.date_computed AS datecomputed
-               FROM tbl_held_forms hf
+               FROM tbl_change_status_forms hf
                  JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
                  JOIN tbl_status current_status ON hf.current_status_id = current_status.id
                  JOIN tbl_status new_status ON hf.new_status_id = new_status.id
@@ -218,7 +218,7 @@ CREATE_ENDING_VIEW_QUERY = """
                         ELSE 0::numeric
                     END) AS total_released,
                 hf.date_computed AS datecomputed
-               FROM tbl_held_forms hf
+               FROM tbl_change_status_forms hf
                  JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
                  JOIN tbl_status current_status ON hf.current_status_id = current_status.id
                  JOIN tbl_status new_status ON hf.new_status_id = new_status.id
@@ -245,7 +245,7 @@ CREATE_ENDING_VIEW_QUERY = """
                         ELSE 0::numeric
                     END) AS total_released,
                 hf.date_computed AS datecomputed
-               FROM tbl_held_forms hf
+               FROM tbl_change_status_forms hf
                  JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
                  JOIN tbl_status current_status ON hf.current_status_id = current_status.id
                  JOIN tbl_status new_status ON hf.new_status_id = new_status.id
@@ -271,7 +271,7 @@ CREATE_ENDING_VIEW_QUERY = """
                         ELSE 0::numeric
                     END) AS total_released,
                 hf.date_computed AS datecomputed
-               FROM tbl_held_forms hf
+               FROM tbl_change_status_forms hf
                  JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
                  JOIN tbl_status current_status ON hf.current_status_id = current_status.id
                  JOIN tbl_status new_status ON hf.new_status_id = new_status.id
@@ -290,7 +290,7 @@ CREATE_ENDING_VIEW_QUERY = """
                 new_status.name AS status,
                 hf.date_computed,
                 hf.new_status_id AS statusid
-               FROM tbl_held_forms hf
+               FROM tbl_change_status_forms hf
                  JOIN tbl_raw_materials rm ON hf.rm_code_id = rm.id
                  JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
                  JOIN tbl_status new_status ON hf.new_status_id = new_status.id
@@ -722,7 +722,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
                 -- tac.date_computed  --Removed 1/16/2026 to fix the computation
 
                FROM tbl_adjustment_correct tac
-                 JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+                 JOIN tbl_change_status_forms hf ON tac.incorrect_change_status_id = hf.id
                  JOIN tbl_warehouses wh ON tac.warehouse_id = wh.id
                  JOIN tbl_status current_status ON tac.current_status_id = current_status.id
                  JOIN tbl_status new_status ON tac.new_status_id = new_status.id
@@ -751,7 +751,7 @@ CREATE_ADJUSTED_ENDING_VIEW_QUERY = """
 
                FROM tbl_adjustment_correct tac
 
-                 JOIN tbl_held_forms hf ON tac.incorrect_change_status_id = hf.id
+                 JOIN tbl_change_status_forms hf ON tac.incorrect_change_status_id = hf.id
                  JOIN tbl_warehouses wh ON hf.warehouse_id = wh.id
                  JOIN tbl_status current_status ON hf.current_status_id = current_status.id
                  JOIN tbl_status new_status ON hf.new_status_id = new_status.id

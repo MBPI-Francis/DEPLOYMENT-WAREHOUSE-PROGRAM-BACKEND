@@ -172,7 +172,13 @@ def update_date_computed(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update date_computed: {str(e)}")
 
 
-@router.post("/accounting/crystallize-stock-on-hand/", summary="Snapshot live ending balances into SOH baseline")
+@router.post(
+    "/accounting/crystallize-stock-on-hand/",
+    summary="Snapshot live ending balances into SOH baseline (Blocks if negative balances exist)",
+    responses={
+        422: {"description": "Negative stock balances detected in one or more warehouses"}
+    }
+)
 def crystallize_stock_on_hand(
     params_date: str = Query(..., description="Snapshot date (YYYY-MM-DD)"),
     request: Request = None,
@@ -181,21 +187,78 @@ def crystallize_stock_on_hand(
 ):
     """
     High-performance snapshot engine:
-    Takes live view_adjusted_ending_balance records and persists them into tbl_stock_on_hand
-    using a single bulk insert in under 50ms.
+    1. Scans view_adjusted_ending_balance for negative balances (< 0.00 kg).
+       - If found: Rejects the request with HTTP 422 and returns the full deficit report.
+    2. Takes valid ending balances and crystalizes them into tbl_stock_on_hand in < 50ms.
+    3. Records an atomic audit log under module 'SYSTEM'.
     """
     try:
         parsed_date = datetime.strptime(params_date.strip(), "%Y-%m-%d").date()
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid date format. Expected YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid date format. Expected YYYY-MM-DD."
+        )
 
+    # -----------------------------------------------------------------------
+    # Step 1: Pre-flight Check for Negative Stock Balances (< 0.00 kg)
+    # -----------------------------------------------------------------------
+    # We join RawMaterial, Warehouse, and Status to give readable error details
+    # so warehouse supervisors know exactly which item and location needs correction.
+    check_negative_query = text("""
+        SELECT 
+            rm.rm_code,
+            rm.rm_name,
+            wh.wh_number,
+            wh.wh_name,
+            st.name AS status_name,
+            v.new_beginning_balance
+        FROM schema_whrm.view_adjusted_ending_balance v
+        JOIN schema_whrm.tbl_raw_materials rm ON v.rawmaterialid = rm.id
+        JOIN schema_whrm.tbl_warehouses wh ON v.warehouseid = wh.id
+        LEFT JOIN schema_whrm.tbl_status st ON v.statusid = st.id
+        WHERE v.new_beginning_balance < 0.00
+        ORDER BY v.new_beginning_balance ASC
+    """)
+
+    negative_rows = db.execute(check_negative_query).fetchall()
+
+    if negative_rows:
+        deficits = [
+            {
+                "rm_code": row.rm_code,
+                "rm_name": row.rm_name,
+                "wh_number": str(row.wh_number),
+                "wh_name": row.wh_name,
+                "status": row.status_name or "unknown",
+                "negative_balance": f"{float(row.new_beginning_balance):.2f} kg"
+            }
+            for row in negative_rows
+        ]
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "Crystallization Blocked: Negative stock balance detected.",
+                "message": (
+                    f"Found {len(deficits)} raw material(s) with negative stock balances. "
+                    "Physical inventory cannot drop below zero. Please review the items below "
+                    "and submit an adjustment form before closing the period."
+                ),
+                "negative_records": deficits
+            }
+        )
+
+    # -----------------------------------------------------------------------
+    # Step 2: Crystallize Valid Balances into tbl_stock_on_hand
+    # -----------------------------------------------------------------------
     try:
-        # Get next sequential recount
+        # Get next sequential recalculation count
         latest_count_query = text("SELECT MAX(stock_recalculation_count) FROM schema_whrm.tbl_stock_on_hand")
         max_count = db.execute(latest_count_query).scalar()
         next_count = (max_count + 1) if max_count is not None else 1
 
-        # Query live balance view
+        # Query all live balances
         view_query = text("""
             SELECT rawmaterialid, warehouseid, new_beginning_balance, statusid 
             FROM schema_whrm.view_adjusted_ending_balance
@@ -210,6 +273,7 @@ def crystallize_stock_on_hand(
                     warehouse_id=row[1],
                     rm_soh=Decimal(str(row[2])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
                     status_id=row[3],
+                    stock_change_date=datetime.utcnow(),  # Matches PostgreSQL 'timestamp without time zone'
                     date_computed=parsed_date,
                     stock_recalculation_count=next_count,
                     created_by_id=current_user.id,
@@ -221,6 +285,9 @@ def crystallize_stock_on_hand(
         if soh_objects:
             db.bulk_save_objects(soh_objects)
 
+        # -------------------------------------------------------------------
+        # Step 3: Record Audit Log
+        # -------------------------------------------------------------------
         AuditLogger.log_action(
             db=db,
             request=request,
@@ -229,20 +296,29 @@ def crystallize_stock_on_hand(
             action="INSERT",
             table_name="tbl_stock_on_hand",
             record_id=current_user.id,
-            payload={"snapshot_date": str(parsed_date), "recalc_count": next_count, "items_crystallized": len(soh_objects)}
+            payload={
+                "action": "crystallize_stock_on_hand",
+                "snapshot_date": str(parsed_date),
+                "recalculation_count": next_count,
+                "records_crystallized": len(soh_objects)
+            }
         )
 
         db.commit()
+
         return {
-            "message": "Stock on hand crystallized successfully.",
+            "message": "Stock on hand crystallized successfully. All balances verified non-negative.",
             "records_created": len(soh_objects),
-            "recalculation_count": next_count
+            "recalculation_count": next_count,
+            "snapshot_date": str(parsed_date)
         }
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Crystallization failed: {str(e)}")
-
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Crystallization transaction failed: {str(e)}"
+        )
 
 @router.post("/accounting/clear-table-data/", summary="Archive/clear active transactions by category")
 def clear_table_data(

@@ -278,12 +278,11 @@ class TempHeldFormService(BaseService):
             raise e
 
     def restore_held_form(
-        self,
-        form_id: UUID,
-        request: Request,
-        current_user: User
+            self,
+            form_id: UUID,
+            request: Request,
+            current_user: User
     ) -> Dict[str, Any]:
-        """Restores a soft-deleted status change entry back to active status atomically."""
         record = self.crud.get_by_id(form_id)
         if not record or not record.is_deleted:
             raise HTTPException(
@@ -291,12 +290,14 @@ class TempHeldFormService(BaseService):
                 detail="Status Change record is not in a deleted state."
             )
 
-        # Before restoring, verify there is still sufficient stock in view_adjusted_ending_balance
+        wh_num = str(record.warehouse_rel.wh_number) if record.warehouse_rel else "1"
+
+        # Re-validate stock availability before allowing restore
         self._resolve_and_validate(
-            rm_code=record.rm_code.rm_code,
-            wh_number=record.warehouse.wh_number,
-            current_status_name=record.current_status.name,
-            new_status_name=record.new_status.name,
+            rm_code=record.raw_material,  # Clean property
+            wh_number=wh_num,
+            current_status_name=record.current_status,  # Clean property
+            new_status_name=record.new_status,  # Clean property
             requested_qty=record.qty_kg
         )
 
@@ -320,3 +321,4 @@ class TempHeldFormService(BaseService):
         except Exception as e:
             self.db.rollback()
             raise e
+
